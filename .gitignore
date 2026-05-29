@@ -1,0 +1,73 @@
+# Python
+
+**pycache**/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite
+*.db
+
+# Virtual Environments
+
+venv/
+.venv/
+env/
+
+# Environment Files
+
+.env
+.env.local
+.env.*
+
+!.env.example
+
+# IDE
+
+.vscode/
+.idea/
+
+# Logs
+
+*.log
+
+# Node
+
+node_modules/
+dist/
+build/
+
+# Qdrant
+
+qdrant_storage/
+
+# Whisper Models
+
+models/
+cache/
+hf_cache/
+
+# OS
+
+.DS_Store
+Thumbs.db
+
+# Testing
+
+.pytest_cache/
+.coverage
+
+# Temporary
+
+temp/
+tmp/
+
+# Generated Media
+
+downloads/
+audio/
+videos/
+transcripts/
+
+# Git
+
+.git/
