@@ -22,17 +22,34 @@ def retrieve_metadata_by_dataset(dataset_id: str) -> list[dict]:
         videos.append(data)
     return videos
 
-def retrieve_chunks(query: str, dataset_id: str, limit: int = 3, platform: str | None = None, time_max: float | None = None) -> list[dict]:
-    return vector_store.search_with_filter(
+def retrieve_chunks(
+    query: str,
+    dataset_id: str,
+    limit: int = 3,
+    platform: str | None = None,
+    time_max: float | None = None
+) -> list[dict]:
+    """Search for chunks. If time‑filtered and no results, fall back to unlimited time."""
+    chunks = vector_store.search_with_filter(
         query, limit,
         dataset_id=dataset_id,
         platform=platform,
         time_max=time_max
     )
+    if not chunks and time_max is not None:
+        # Fallback: try without time restriction, then pick the earliest segments
+        chunks = vector_store.search_with_filter(
+            query, max(limit * 2, 10),   # retrieve more to find early ones
+            dataset_id=dataset_id,
+            platform=platform
+        )
+        # Sort by start_time and keep the earliest ones
+        chunks.sort(key=lambda c: c.get("start_time", 0))
+        chunks = chunks[:limit]
+    return chunks
 
 def classify_question(question: str) -> dict:
     q = question.lower()
-    intent = "both"
     meta_keywords = ["creator", "engagement rate", "views", "likes", "comments",
                      "followers", "upload date", "follower count", "who is the creator",
                      "engagement", "top", "average"]
@@ -50,6 +67,8 @@ def classify_question(question: str) -> dict:
         intent = "metadata"
     elif content_hit:
         intent = "content"
+    else:
+        intent = "both"
     return {"intent": intent, "filter_first_5": time_hit}
 
 def retrieve_context(question: str, dataset_id: str, platform: str = "youtube") -> dict:
@@ -62,15 +81,14 @@ def retrieve_context(question: str, dataset_id: str, platform: str = "youtube") 
     all_metadata = retrieve_metadata_by_dataset(dataset_id)
     analytics_summary = get_platform_summary_for_dataset(dataset_id) if all_metadata else {}
     semantic_profiles = get_semantic_profiles_for_dataset(dataset_id) if dataset_id else []
-    
-    # Build hook summary for the prompt
+
+    # Build hook summary
     hook_lines = []
     for p in semantic_profiles:
         title = p.get("title", p["video_id"])
         hook = p.get("hook_score", 0)
-        humor = p.get("avg_humor", 0)
-        hook_lines.append(f"- **{title}**: Hook Score {hook}/10, Avg Humor {humor}/10")
-    hook_summary = "\n".join(hook_lines) if hook_lines else "No hook data available."
+        hook_lines.append(f"- **{title}**: Hook={hook}/10 (coverage: {p.get('transcript_coverage', 0)}%)")
+    hook_summary = "\n".join(hook_lines) if hook_lines else "No hook data."
 
     chunks = []
     if intent in ("content", "both"):
@@ -87,6 +105,7 @@ def retrieve_context(question: str, dataset_id: str, platform: str = "youtube") 
         "analytics_summary": analytics_summary,
         "chunks": chunks,
         "hook_summary": hook_summary,
+        "semantic_profiles": semantic_profiles,
         "intent": intent,
         "filter_first_5": filter_time
     }

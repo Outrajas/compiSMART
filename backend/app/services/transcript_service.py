@@ -34,16 +34,19 @@ class TranscriptService:
             logger.error(f"Whisper fallback failed: {e}")
             raise RuntimeError(f"Transcript extraction failed for {url}") from e
 
-    def _compute_semantic_features(self, text: str) -> dict:
-        """Extract richer semantic signals using heuristic rules."""
+    def _compute_semantic_features(self, text: str, segment_index: int, total_segments: int) -> dict:
+        """
+        Enhanced semantic feature extraction with calibrated 0‑10 scales.
+        Also considers segment position (opening, middle, closing) to weight hook score.
+        """
         text_lower = text.lower()
 
-        # Questions
+        # Question detection
         question_words = ['?', 'what', 'how', 'why', 'who', 'when', 'where', 'which']
         question_count = sum(1 for w in question_words if w in text_lower)
         has_question = question_count > 0
 
-        # Conflict / tension
+        # Conflict
         conflict_terms = ['but', 'however', 'no ', 'not ', 'fight', 'against', 'problem', 'issue',
                           'bad', 'wrong', 'anger', 'angry', 'hate', 'enemy', 'challenge', 'conflict',
                           'disagree', 'argue', 'debate', 'tension']
@@ -53,40 +56,46 @@ class TranscriptService:
         # Emotional intensity
         emotion_words = ['!', 'very', 'really', 'so ', 'extremely', 'amazing', 'awesome', 'terrible',
                          'incredible', 'love', 'hate', 'happy', 'sad', 'angry', 'excited', 'scared',
-                         'wow', 'omg', 'fantastic', 'horrible']
-        emotion_score = sum(1 for w in emotion_words if w in text_lower)
+                         'wow', 'omg', 'fantastic', 'horrible', 'epic', 'legendary', 'masterpiece']
+        emotion_raw = sum(1 for w in emotion_words if w in text_lower)
+        emotion_score = min(10, emotion_raw * 2)
 
         # Humor
         humor_words = ['lol', 'haha', 'funny', 'joke', 'laugh', 'comedy', 'humor', 'hilarious',
-                       'fun', 'entertainment', '😂', '🤣', 'rofl', 'lmao']
-        humor_score = sum(1 for w in humor_words if w in text_lower)
+                       'fun', 'entertainment', '😂', '🤣', 'rofl', 'lmao', 'jokes', 'prank', 'gag']
+        humor_raw = sum(1 for w in humor_words if w in text_lower)
+        humor_score = min(10, humor_raw * 2)
 
         # Curiosity gap
         curiosity_words = ['?', 'wait', 'imagine', 'what if', 'secret', 'surprise', 'reveal', 'truth',
-                           'unexpected', 'twist', 'discover', 'find out', 'see what happens']
-        curiosity_score = sum(1 for w in curiosity_words if w in text_lower)
+                           'unexpected', 'twist', 'discover', 'find out', 'see what happens', 'stay tuned',
+                           'watch till the end']
+        curiosity_raw = sum(1 for w in curiosity_words if w in text_lower)
+        curiosity_score = min(10, curiosity_raw * 2)
 
-        # Character introduction (crude name detection)
+        # CTA
+        cta_phrases = ['subscribe', 'like', 'share', 'comment', 'follow', 'click', 'link',
+                       'check out', 'visit', 'watch till the end', 'hit the bell']
+        cta_raw = sum(1 for phrase in cta_phrases if phrase in text_lower)
+        cta_score = min(10, cta_raw * 2)
+
+        # Entity count (crude proper nouns)
         name_pattern = re.compile(r'\b[A-Z][a-z]+\b')
         names = name_pattern.findall(text)
         entity_count = len(set(names))
 
-        # Call to action (CTA)
-        cta_phrases = ['subscribe', 'like', 'share', 'comment', 'follow', 'click', 'link',
-                       'check out', 'visit', 'watch till the end']
-        cta_count = sum(1 for phrase in cta_phrases if phrase in text_lower)
-
-        # Hook score composite (0-10)
-        hook_score = min(10, (has_question * 3 + has_conflict * 2 + curiosity_score * 1.5 + entity_count * 0.5) / 1.5)
-        hook_score = round(min(10, max(0, hook_score)), 1)
+        # Hook score: weighted sum, with bonus for being in the first 3 segments
+        position_bonus = 1.5 if segment_index < 3 else 0
+        hook_score = (has_question * 3.0 + has_conflict * 2.0 + curiosity_raw * 1.5 + entity_count * 0.3 + position_bonus)
+        hook_score = round(min(10, hook_score), 1)
 
         return {
             "question": has_question,
             "conflict": has_conflict,
-            "emotion": min(10, emotion_score),
-            "humor_score": min(10, humor_score * 2),
-            "curiosity_score": min(10, curiosity_score * 2),
-            "cta_score": min(10, cta_count * 2),
+            "emotion": emotion_score,
+            "humor_score": humor_score,
+            "curiosity_score": curiosity_score,
+            "cta_score": cta_score,
             "hook_score": hook_score,
             "entity_count": entity_count
         }
@@ -100,12 +109,13 @@ class TranscriptService:
                 transcript_list = api.fetch(video_id, languages=[lang])
                 segments = []
                 full_text_parts = []
-                for snippet in transcript_list:
+                total = len(transcript_list)
+                for i, snippet in enumerate(transcript_list):
                     start = snippet.start
                     duration = snippet.duration
                     end = start + duration
                     text = snippet.text
-                    features = self._compute_semantic_features(text)
+                    features = self._compute_semantic_features(text, i, total)
                     segments.append({
                         "start": start,
                         "end": end,
@@ -129,12 +139,13 @@ class TranscriptService:
             transcript_list = api.fetch(video_id)
             segments = []
             full_text_parts = []
-            for snippet in transcript_list:
+            total = len(transcript_list)
+            for i, snippet in enumerate(transcript_list):
                 start = snippet.start
                 duration = snippet.duration
                 end = start + duration
                 text = snippet.text
-                features = self._compute_semantic_features(text)
+                features = self._compute_semantic_features(text, i, total)
                 segments.append({
                     "start": start,
                     "end": end,
@@ -179,8 +190,9 @@ class TranscriptService:
             segments_raw, _ = model.transcribe(actual_audio, beam_size=5)
             segments = []
             full_text_parts = []
-            for seg in segments_raw:
-                features = self._compute_semantic_features(seg.text)
+            total = len(segments_raw)
+            for i, seg in enumerate(segments_raw):
+                features = self._compute_semantic_features(seg.text, i, total)
                 segments.append({
                     "start": seg.start,
                     "end": seg.end,

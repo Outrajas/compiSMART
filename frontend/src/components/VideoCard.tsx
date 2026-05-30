@@ -12,8 +12,11 @@ export default function VideoCard({ data }: { data: VideoMetadata }) {
         <li><span className="font-medium">Likes:</span> {data.likes?.toLocaleString()}</li>
         <li><span className="font-medium">Comments:</span> {data.comments?.toLocaleString()}</li>
         <li><span className="font-medium">Followers:</span> {data.follower_count?.toLocaleString() || 'N/A'}</li>
-        <li><span className="font-medium">Duration:</span> {data.duration}s</li>
-        <li><span className="font-medium">Engagement Rate:</span> {data.engagement_rate?.toFixed(4)}%</li>
+        <li><span className="font-medium">Duration:</span> {data.duration ? `${data.duration}s` : 'N/A'}</li>
+        <li>
+          <span className="font-medium">Engagement Rate:</span>{' '}
+          {data.engagement_rate != null ? `${data.engagement_rate.toFixed(4)}%` : 'N/A'}
+        </li>
         <li><span className="font-medium">Hashtags:</span> {data.hashtags?.join(', ') || 'None'}</li>
       </ul>
     </div>

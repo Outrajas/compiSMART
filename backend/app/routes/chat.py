@@ -15,19 +15,16 @@ from groq import Groq
 
 router = APIRouter(tags=["chat"])
 
-class Source(BaseModel):
-    video_id: str
-    chunk_id: Optional[int] = None
-
 class ChatResponse(BaseModel):
     answer: str
     sources: List[str]
 
 def _process_chat(question: str, session_id: str, dataset_id: str, platform: str):
+    logger.info(f"USER QUESTION: {question}")          # debug
     history = get_chat_history(session_id, limit=10)
     context = retrieve_context(question, dataset_id=dataset_id, platform=platform)
     prompt = build_prompt(question, context, history, platform=platform)
-    sources = build_citations(context)
+    logger.info(f"FINAL PROMPT (first 500 chars): {prompt[:500]}")  # debug
 
     client = Groq(api_key=settings.groq_api_key)
     response = client.chat.completions.create(
@@ -36,10 +33,11 @@ def _process_chat(question: str, session_id: str, dataset_id: str, platform: str
         temperature=0.3,
     )
     answer = response.choices[0].message.content
+    logger.info(f"ANSWER (first 300 chars): {answer[:300]}")
 
     add_chat_message(session_id, "user", question)
     add_chat_message(session_id, "assistant", answer)
-    return answer, sources
+    return answer, build_citations(context)
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
@@ -57,6 +55,7 @@ async def chat_stream_endpoint(request: ChatRequest):
     platform = request.platform
     question = request.question
 
+    logger.info(f"STREAM USER QUESTION: {question}")
     history = get_chat_history(session_id, limit=10)
     context = retrieve_context(question, dataset_id=dataset_id, platform=platform)
     prompt = build_prompt(question, context, history, platform=platform)

@@ -1,4 +1,3 @@
-// frontend/src/types/index.ts (updated)
 export interface VideoMetadata {
   video_id: string;
   platform: string;
@@ -12,6 +11,10 @@ export interface VideoMetadata {
   hashtags?: string[];
   follower_count?: number;
   engagement_rate?: number;
+  views_per_follower?: number;
+  likes_per_1000_views?: number;
+  comments_per_1000_views?: number;
+  engagement_efficiency?: number;
 }
 
 export interface IngestedItem {
@@ -33,12 +36,6 @@ export interface ChatResponse {
   sources: string[];
 }
 
-export interface SSEEvent {
-  type: 'token' | 'sources' | 'done' | 'error';
-  content?: string;
-  sources?: string[];
-}
-
 export interface AnalyticsSummary {
   count: number;
   total_views: number;
@@ -55,6 +52,9 @@ export interface AnalyticsSummary {
   largest_creator: string;
   largest_creator_followers: number;
   average_engagement: number;
+  outlier_videos?: string[];
+  best_views_per_follower_title?: string;
+  best_views_per_follower_value?: number;
 }
 
 export interface VideoAnalytics extends VideoMetadata {
@@ -67,6 +67,11 @@ export interface VideoAnalytics extends VideoMetadata {
   rank_by_likes: number;
   rank_by_comments: number;
 }
+export interface SSEEvent {
+  type: 'token' | 'sources' | 'done' | 'error';
+  content?: string;
+  sources?: string[];
+}
 export interface SemanticProfile {
   video_id: string;
   title: string;
@@ -77,4 +82,14 @@ export interface SemanticProfile {
   avg_conflict: number;
   avg_question: number;
   avg_cta: number;
+  transcript_coverage: number;
+  total_segments: number;
+  hook_breakdown: {
+    question: number;
+    conflict: number;
+    emotion: number;
+    humor: number;
+    curiosity: number;
+    cta: number;
+  };
 }

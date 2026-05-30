@@ -36,10 +36,19 @@ async def ingest_videos(payload: VideoInput):
                 else:
                     meta = metadata_service.instagram.get_metadata(url_str)
 
+                # Compute engagement rate and attach to meta for response
+                views = meta.get("views") or 0
+                likes = meta.get("likes") or 0
+                comments = meta.get("comments") or 0
+                if views > 0:
+                    meta["engagement_rate"] = round((likes + comments) / views * 100, 4)
+                else:
+                    meta["engagement_rate"] = None
+
                 # 2. Video ID
                 video_id = generate_video_id(platform)
 
-                # 3. Store metadata in SQLite (now with dataset_id)
+                # 3. Store metadata in SQLite (with dataset_id)
                 conn = get_connection()
                 conn.execute("""
                     INSERT INTO videos 
@@ -70,16 +79,15 @@ async def ingest_videos(payload: VideoInput):
                             id=str(uuid.uuid4()),
                             vector=emb,
                             payload={
-                                "dataset_id": dataset_id,    # dataset isolation
+                                "dataset_id": dataset_id,
                                 "video_id": video_id,
                                 "platform": platform,
                                 "chunk_id": i,
                                 "text": seg["text"],
                                 "start_time": seg["start"],
                                 "end_time": seg["end"],
-                                "semantic_features": seg.get("semantic_features", {}),
+                                "semantic_features": seg.get("semantic_features", {})
                             }
-                        
                         ))
                     if points:
                         vector_store.client.upsert(
@@ -92,7 +100,7 @@ async def ingest_videos(payload: VideoInput):
                     "video_id": video_id,
                     "platform": platform,
                     "url": url_str,
-                    "metadata": meta,
+                    "metadata": meta,   # now includes engagement_rate
                     "chunk_count": chunk_count
                 })
                 logger.info(f"Ingested {platform} video {video_id} into dataset {dataset_id}")

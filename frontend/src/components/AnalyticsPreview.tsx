@@ -21,7 +21,7 @@ export default function AnalyticsPreview({ platform, datasetId }: Props) {
 
   if (!summary || summary.count === 0) return null;
 
-  const chartData = rankings.slice(0, 5).map(v => ({
+  const chartData = rankings.map(v => ({
     name: v.title?.substring(0, 25) || v.video_id,
     engagement: v.engagement_rate
   }));
@@ -29,6 +29,22 @@ export default function AnalyticsPreview({ platform, datasetId }: Props) {
   const hookChartData = profiles.map(p => ({
     name: p.title?.substring(0, 25) || p.video_id,
     hookScore: p.hook_score
+  }));
+
+  const coverageData = profiles.map(p => ({
+    name: p.title?.substring(0, 25) || p.video_id,
+    coverage: p.transcript_coverage
+  }));
+
+  const vpfData = rankings.map(v => ({
+    name: v.title?.substring(0, 25) || v.video_id,
+    vpf: v.views_per_follower || 0
+  }));
+
+  // Hook breakdown table
+  const breakdownRows = profiles.map(p => ({
+    title: p.title?.substring(0, 30) || p.video_id,
+    ...p.hook_breakdown
   }));
 
   return (
@@ -55,6 +71,12 @@ export default function AnalyticsPreview({ platform, datasetId }: Props) {
         </div>
       </div>
 
+      {summary.outlier_videos && summary.outlier_videos.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
+          ⚠️ Viral outlier (extremely high Views/Follower): {summary.outlier_videos.join(', ')}
+        </div>
+      )}
+
       {chartData.length > 1 && (
         <div className="bg-white p-4 rounded-lg shadow">
           <h3 className="text-sm font-medium mb-2">Engagement Comparison</h3>
@@ -65,6 +87,21 @@ export default function AnalyticsPreview({ platform, datasetId }: Props) {
               <YAxis unit="%" />
               <Tooltip />
               <Bar dataKey="engagement" fill="#8b5cf6" name="Engagement %" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {vpfData.length > 1 && (
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h3 className="text-sm font-medium mb-2">📈 Views per Follower</h3>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={vpfData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="name" tick={{fontSize: 10}} angle={-20} textAnchor="end" height={60} />
+              <YAxis />
+              <Tooltip />
+              <Bar dataKey="vpf" fill="#ec4899" name="Views/Follower" />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -82,6 +119,53 @@ export default function AnalyticsPreview({ platform, datasetId }: Props) {
               <Bar dataKey="hookScore" fill="#f59e0b" name="Hook Score" />
             </BarChart>
           </ResponsiveContainer>
+        </div>
+      )}
+
+      {coverageData.length > 0 && (
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h3 className="text-sm font-medium mb-2">📊 Transcript Coverage (%)</h3>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={coverageData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="name" tick={{fontSize: 10}} angle={-20} textAnchor="end" height={60} />
+              <YAxis unit="%" />
+              <Tooltip />
+              <Bar dataKey="coverage" fill="#06b6d4" name="Coverage %" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {breakdownRows.length > 0 && (
+        <div className="bg-white p-4 rounded-lg shadow overflow-x-auto">
+          <h3 className="text-sm font-medium mb-2">🧩 Hook Score Breakdown (avg % or score)</h3>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left border-b">
+                <th>Video</th>
+                <th>Question</th>
+                <th>Conflict</th>
+                <th>Emotion</th>
+                <th>Humor</th>
+                <th>Curiosity</th>
+                <th>CTA</th>
+              </tr>
+            </thead>
+            <tbody>
+              {breakdownRows.map((r, i) => (
+                <tr key={i} className="border-b">
+                  <td className="py-1">{r.title}</td>
+                  <td>{r.question}%</td>
+                  <td>{r.conflict}%</td>
+                  <td>{r.emotion}/10</td>
+                  <td>{r.humor}/10</td>
+                  <td>{r.curiosity}/10</td>
+                  <td>{r.cta}/10</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
