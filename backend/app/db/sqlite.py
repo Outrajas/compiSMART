@@ -25,6 +25,11 @@ def init_db():
             follower_count INTEGER
         )
     """)
+    # Add dataset_id column if it doesn't exist
+    try:
+        conn.execute("ALTER TABLE videos ADD COLUMN dataset_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     conn.execute("""
         CREATE TABLE IF NOT EXISTS chat_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,7 +53,6 @@ def add_chat_message(session_id: str, role: str, message: str):
     conn.close()
 
 def get_chat_history(session_id: str, limit: int = 10) -> str:
-    """Return last 'limit' messages formatted as a string."""
     conn = get_connection()
     rows = conn.execute(
         "SELECT role, message FROM chat_history WHERE session_id = ? ORDER BY timestamp ASC LIMIT ?",

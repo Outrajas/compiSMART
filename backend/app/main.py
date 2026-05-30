@@ -7,6 +7,7 @@ from app.routes.metadata import router as metadata_router
 from app.routes.chat import router as chat_router
 from app.core.config import settings
 from app.core.logger import logger
+from app.routes.analytics import router as analytics_router
 from app.db.sqlite import init_db
 
 app = FastAPI(
@@ -25,6 +26,8 @@ app.include_router(ingest_router)
 app.include_router(search_router)
 app.include_router(metadata_router)
 app.include_router(chat_router)
+app.include_router(analytics_router)
+
 
 @app.on_event("startup")
 async def startup_event():

@@ -1,27 +1,28 @@
-import type { IngestResponse, ChatResponse } from '../types';
+// frontend/src/services/api.ts
+import type { IngestResponse, ChatResponse, AnalyticsSummary, VideoAnalytics , SemanticProfile} from '../types';
 
-const BASE = 'http://127.0.0.1:8000'; // Use direct URL (CORS enabled)
+const BASE = 'http://127.0.0.1:8000';
 
 export async function healthCheck() {
   const res = await fetch(`${BASE}/health`);
   return res.json();
 }
 
-export async function ingestVideos(youtubeUrl: string, instagramUrl: string): Promise<IngestResponse> {
+export async function ingestVideos(youtubeUrls: string[], instagramUrls: string[]): Promise<IngestResponse> {
   const res = await fetch(`${BASE}/ingest`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ youtube_url: youtubeUrl, instagram_url: instagramUrl }),
+    body: JSON.stringify({ youtube_urls: youtubeUrls, instagram_urls: instagramUrls }),
   });
   if (!res.ok) throw new Error(`Ingest failed: ${await res.text()}`);
   return res.json();
 }
 
-export async function chat(sessionId: string, question: string): Promise<ChatResponse> {
+export async function chat(sessionId: string, platform: string, datasetId: string, question: string): Promise<ChatResponse> {
   const res = await fetch(`${BASE}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session_id: sessionId, question }),
+    body: JSON.stringify({ session_id: sessionId, platform, dataset_id: datasetId, question }),
   });
   if (!res.ok) throw new Error(`Chat failed: ${await res.text()}`);
   return res.json();
@@ -29,16 +30,18 @@ export async function chat(sessionId: string, question: string): Promise<ChatRes
 
 export async function chatStream(
   sessionId: string,
+  platform: string,
+  datasetId: string,
   question: string,
   onToken: (token: string) => void,
-  onSources: (sources: { video_id: string; chunk_id: number | null }[]) => void,
+  onSources: (sources: string[]) => void,
   onDone: () => void,
   onError: (err: string) => void
 ) {
   const res = await fetch(`${BASE}/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session_id: sessionId, question }),
+    body: JSON.stringify({ session_id: sessionId, platform, dataset_id: datasetId, question }),
   });
   if (!res.ok) {
     onError(`Stream error: ${await res.text()}`);
@@ -56,7 +59,6 @@ export async function chatStream(
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
-    // Keep last incomplete line in buffer
     buffer = lines.pop() || '';
 
     for (const line of lines) {
@@ -79,9 +81,27 @@ export async function chatStream(
               break;
           }
         } catch {
-          // ignore parse errors for incomplete lines
+          // ignore parse errors
         }
       }
     }
   }
+}
+
+export async function getAnalyticsSummary(datasetId: string): Promise<AnalyticsSummary> {
+  const res = await fetch(`${BASE}/analytics/summary?dataset_id=${datasetId}`);
+  if (!res.ok) throw new Error('Failed to fetch summary');
+  return res.json();
+}
+
+export async function getAnalyticsRankings(datasetId: string): Promise<VideoAnalytics[]> {
+  const res = await fetch(`${BASE}/analytics/rankings?dataset_id=${datasetId}`);
+  if (!res.ok) throw new Error('Failed to fetch rankings');
+  return res.json();
+
+}
+export async function getSemanticProfiles(datasetId: string): Promise<SemanticProfile[]> {
+  const res = await fetch(`${BASE}/analytics/semantic-profiles?dataset_id=${datasetId}`);
+  if (!res.ok) throw new Error('Failed to fetch semantic profiles');
+  return res.json();
 }

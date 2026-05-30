@@ -1,5 +1,5 @@
 interface Props {
-  sources: { video_id: string; chunk_id: number | null }[];
+  sources: string[];   // now strings, not objects
 }
 
 export default function SourceCitation({ sources }: Props) {
@@ -10,10 +10,8 @@ export default function SourceCitation({ sources }: Props) {
       <span className="font-medium">Sources: </span>
       {sources.map((s, i) => (
         <span key={i} className="mr-2">
-          {s.chunk_id
-            ? `Video ${s.video_id} Chunk ${s.chunk_id}`
-            : `Video ${s.video_id} metadata`}
-          {i < sources.length - 1 ? ', ' : ''}
+          {s}
+          {i < sources.length - 1 ? ' • ' : ''}
         </span>
       ))}
     </div>

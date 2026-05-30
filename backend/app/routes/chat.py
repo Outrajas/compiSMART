@@ -10,6 +10,7 @@ from app.rag.citation_builder import build_citations
 from app.core.config import settings
 from app.core.logger import logger
 from app.db.sqlite import add_chat_message, get_chat_history
+from app.models.chat import ChatRequest
 from groq import Groq
 
 router = APIRouter(tags=["chat"])
@@ -18,25 +19,14 @@ class Source(BaseModel):
     video_id: str
     chunk_id: Optional[int] = None
 
-class ChatRequest(BaseModel):
-    session_id: str
-    question: str
-
 class ChatResponse(BaseModel):
     answer: str
-    sources: List[Source]
+    sources: List[str]
 
-def _process_chat(question: str, session_id: str):
-    """
-    Core logic: retrieve, build prompt with history, call Groq.
-    Returns (answer, sources).
-    """
-    # Load conversation history
+def _process_chat(question: str, session_id: str, dataset_id: str, platform: str):
     history = get_chat_history(session_id, limit=10)
-
-    # Retrieve fresh context
-    context = retrieve_context(question)
-    prompt = build_prompt(question, context, history)
+    context = retrieve_context(question, dataset_id=dataset_id, platform=platform)
+    prompt = build_prompt(question, context, history, platform=platform)
     sources = build_citations(context)
 
     client = Groq(api_key=settings.groq_api_key)
@@ -47,32 +37,29 @@ def _process_chat(question: str, session_id: str):
     )
     answer = response.choices[0].message.content
 
-    # Persist messages
     add_chat_message(session_id, "user", question)
     add_chat_message(session_id, "assistant", answer)
-
     return answer, sources
 
-# Non‑streaming endpoint
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
     try:
-        answer, sources = _process_chat(request.question, request.session_id)
+        answer, sources = _process_chat(request.question, request.session_id, request.dataset_id, request.platform)
         return ChatResponse(answer=answer, sources=sources)
     except Exception as e:
         logger.error(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Streaming endpoint
 @router.post("/chat/stream")
 async def chat_stream_endpoint(request: ChatRequest):
     session_id = request.session_id
+    dataset_id = request.dataset_id
+    platform = request.platform
     question = request.question
 
-    # Load history, retrieve context
     history = get_chat_history(session_id, limit=10)
-    context = retrieve_context(question)
-    prompt = build_prompt(question, context, history)
+    context = retrieve_context(question, dataset_id=dataset_id, platform=platform)
+    prompt = build_prompt(question, context, history, platform=platform)
     sources = build_citations(context)
 
     async def event_generator():
@@ -93,11 +80,9 @@ async def chat_stream_endpoint(request: ChatRequest):
                     yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
                     await asyncio.sleep(0)
 
-            # Store the conversation after streaming complete
             add_chat_message(session_id, "user", question)
             add_chat_message(session_id, "assistant", full_answer)
 
-            # Send sources
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
