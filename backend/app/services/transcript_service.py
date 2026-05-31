@@ -35,10 +35,7 @@ class TranscriptService:
             raise RuntimeError(f"Transcript extraction failed for {url}") from e
 
     def _compute_semantic_features(self, text: str, segment_index: int, total_segments: int) -> dict:
-        """
-        Enhanced semantic feature extraction with calibrated 0‑10 scales.
-        Also considers segment position (opening, middle, closing) to weight hook score.
-        """
+        """Enhanced semantic feature extraction with calibrated 0‑10 scales."""
         text_lower = text.lower()
 
         # Question detection

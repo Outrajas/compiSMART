@@ -66,15 +66,15 @@ export default function UploadForm({ platform, onIngested }: Props) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="bg-white p-6 rounded-xl shadow mb-6">
-      <h2 className="text-xl font-semibold mb-4">
+    <form onSubmit={handleSubmit} className="glass-card p-6 mb-8 transition-all duration-300">
+      <h2 className="text-2xl font-bold mb-5 bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent">
         {platform === 'youtube' ? 'Add YouTube Videos' : 'Add Instagram Reels'}
       </h2>
 
       {platform === 'youtube' && (
-        <div className="mb-4">
+        <div className="mb-5">
           {ytUrls.map((url, i) => (
-            <div key={i} className="flex gap-2 mt-1">
+            <div key={i} className="flex gap-2 mt-2">
               <input
                 type="url"
                 placeholder="https://www.youtube.com/watch?v=..."
@@ -84,21 +84,21 @@ export default function UploadForm({ platform, onIngested }: Props) {
                   newArr[i] = e.target.value;
                   setYtUrls(newArr);
                 }}
-                className="border p-2 rounded flex-1"
+                className="border border-gray-200 rounded-xl p-3 flex-1 focus:ring-2 focus:ring-red-400 focus:border-transparent transition-all shadow-sm"
               />
               {ytUrls.length > 1 && (
-                <button type="button" onClick={() => removeYtField(i)} className="text-red-500 font-bold">×</button>
+                <button type="button" onClick={() => removeYtField(i)} className="text-red-500 font-bold text-xl hover:scale-110 transition">×</button>
               )}
             </div>
           ))}
-          <button type="button" onClick={addYtField} className="text-blue-600 text-sm mt-1">+ Add YouTube URL</button>
+          <button type="button" onClick={addYtField} className="text-red-500 text-sm mt-2 hover:underline flex items-center gap-1">+ Add YouTube URL</button>
         </div>
       )}
 
       {platform === 'instagram' && (
-        <div className="mb-4">
+        <div className="mb-5">
           {igUrls.map((url, i) => (
-            <div key={i} className="flex gap-2 mt-1">
+            <div key={i} className="flex gap-2 mt-2">
               <input
                 type="url"
                 placeholder="https://www.instagram.com/reel/..."
@@ -108,23 +108,30 @@ export default function UploadForm({ platform, onIngested }: Props) {
                   newArr[i] = e.target.value;
                   setIgUrls(newArr);
                 }}
-                className="border p-2 rounded flex-1"
+                className="border border-gray-200 rounded-xl p-3 flex-1 focus:ring-2 focus:ring-pink-400 focus:border-transparent transition-all shadow-sm"
               />
               {igUrls.length > 1 && (
-                <button type="button" onClick={() => removeIgField(i)} className="text-red-500 font-bold">×</button>
+                <button type="button" onClick={() => removeIgField(i)} className="text-red-500 font-bold text-xl hover:scale-110 transition">×</button>
               )}
             </div>
           ))}
-          <button type="button" onClick={addIgField} className="text-blue-600 text-sm mt-1">+ Add Instagram URL</button>
+          <button type="button" onClick={addIgField} className="text-pink-500 text-sm mt-2 hover:underline flex items-center gap-1">+ Add Instagram URL</button>
         </div>
       )}
 
       <button
         type="submit"
         disabled={loading}
-        className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+        className="mt-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl font-semibold shadow-md hover:shadow-xl transition-all duration-200 transform hover:scale-[1.02] disabled:opacity-50 disabled:hover:scale-100"
       >
-        {loading ? 'Analyzing...' : 'Analyze Videos'}
+        {loading ? (
+          <span className="flex items-center gap-2">
+            <svg className="animate-spin h-5 w-5 text-white" viewBox="0 0 24 24">...</svg>
+            Analyzing...
+          </span>
+        ) : (
+          'Analyze Videos ✨'
+        )}
       </button>
     </form>
   );

@@ -1,3 +1,4 @@
+// frontend/src/hooks/useStreaming.ts (unchanged - no UI changes)
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { chatStream } from '../services/api';
 
@@ -6,7 +7,7 @@ export function useStreaming(sessionId: string, platform: string, datasetId: str
   const [sources, setSources] = useState<string[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const datasetRef = useRef(datasetId);   // always current
+  const datasetRef = useRef(datasetId);
 
   useEffect(() => {
     datasetRef.current = datasetId;
@@ -35,7 +36,7 @@ export function useStreaming(sessionId: string, platform: string, datasetId: str
         }
       );
     },
-    [sessionId, platform]   // datasetId is read via ref to avoid stale closures
+    [sessionId, platform]
   );
 
   const resetStreaming = useCallback(() => {

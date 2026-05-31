@@ -1,17 +1,20 @@
+// frontend/src/components/SourceCitation.tsx
 interface Props {
-  sources: string[];   // now strings, not objects
+  sources: string[];
 }
 
 export default function SourceCitation({ sources }: Props) {
   if (!sources.length) return null;
 
   return (
-    <div className="mt-2 text-xs text-gray-500">
-      <span className="font-medium">Sources: </span>
+    <div className="mt-3 flex flex-wrap gap-2 text-xs">
+      <span className="font-medium text-gray-500">Sources:</span>
       {sources.map((s, i) => (
-        <span key={i} className="mr-2">
+        <span
+          key={i}
+          className="px-2 py-1 bg-gray-100 rounded-full text-gray-600 hover:bg-gray-200 transition-colors"
+        >
           {s}
-          {i < sources.length - 1 ? ' • ' : ''}
         </span>
       ))}
     </div>

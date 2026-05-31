@@ -1,3 +1,4 @@
+// frontend/src/components/ChatSidebar.tsx
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useStreaming } from '../hooks/useStreaming';
 import ReactMarkdown from 'react-markdown';
@@ -20,7 +21,6 @@ export default function ChatSidebar({ sessionId, platform, datasetId, isOpen, on
   const { answer, streaming, sendMessage, resetStreaming } = useStreaming(sessionId, platform, datasetId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Detect dataset change and show a notification
   useEffect(() => {
     if (datasetId && previousDataset && datasetId !== previousDataset) {
       setShowContextUpdate(true);
@@ -29,7 +29,6 @@ export default function ChatSidebar({ sessionId, platform, datasetId, isOpen, on
     setPreviousDataset(datasetId);
   }, [datasetId, previousDataset]);
 
-  // Update assistant message when streaming answer changes
   useEffect(() => {
     if (answer) {
       setMessages(prev => {
@@ -63,39 +62,39 @@ export default function ChatSidebar({ sessionId, platform, datasetId, isOpen, on
   if (!isOpen) return null;
 
   return (
-    <div className="w-96 border-l border-gray-200 bg-white flex flex-col h-full shadow-lg fixed right-0 top-0 z-40">
-      <div className="p-4 border-b flex justify-between items-center">
-        <h2 className="font-semibold">AI Assistant</h2>
-        <div className="flex items-center gap-2">
+    <div className="w-96 border-l border-gray-200/70 bg-white/95 backdrop-blur-md flex flex-col h-full shadow-2xl fixed right-0 top-0 z-40 animate-slide-up">
+      <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gradient-to-r from-indigo-50 to-white">
+        <h2 className="font-bold text-xl bg-gradient-to-r from-indigo-700 to-purple-700 bg-clip-text text-transparent">AI Assistant</h2>
+        <div className="flex items-center gap-3">
           <button
             onClick={handleClearMemory}
-            className="text-xs text-red-500 hover:text-red-700 underline"
+            className="text-xs text-rose-500 hover:text-rose-700 underline transition"
             title="Wipe chat memory"
           >
             Clear Memory
           </button>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-transform hover:rotate-90">
             <XMarkIcon className="h-5 w-5" />
           </button>
         </div>
       </div>
 
       {showContextUpdate && (
-        <div className="bg-green-50 border-b border-green-200 p-2 text-sm text-green-700">
+        <div className="bg-emerald-50 border-l-4 border-emerald-500 p-3 text-sm text-emerald-800 animate-pulse-glow">
           ✅ New analysis detected. Context updated.
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-5 space-y-5">
         {messages.length === 0 && !streaming && (
-          <div className="text-gray-400 text-sm text-center mt-4">
+          <div className="text-gray-400 text-sm text-center mt-8">
             {datasetId ? 'Ask a question about the analyzed videos.' : 'Submit video links to start analysis.'}
           </div>
         )}
         {messages.map((msg, idx) => (
-          <div key={`${msg.role}-${idx}`} className={`${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
-            <div className={`inline-block max-w-[85%] p-3 rounded-lg ${
-              msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'
+          <div key={`${msg.role}-${idx}`} className={`${msg.role === 'user' ? 'text-right' : 'text-left'} animate-fade-in`}>
+            <div className={`inline-block max-w-[85%] p-3 rounded-2xl shadow-sm ${
+              msg.role === 'user' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white' : 'bg-gray-100 text-gray-800'
             }`}>
               {msg.role === 'assistant' ? (
                 <div className="prose prose-sm max-w-none">
@@ -107,24 +106,24 @@ export default function ChatSidebar({ sessionId, platform, datasetId, isOpen, on
             </div>
           </div>
         ))}
-        {streaming && !answer && <div className="text-gray-400 text-sm">Thinking...</div>}
+        {streaming && !answer && <div className="text-gray-400 text-sm flex gap-1">Thinking<span className="animate-pulse">...</span></div>}
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="p-4 border-t flex gap-2">
+      <div className="p-5 border-t border-gray-100 flex gap-2 bg-white/50 backdrop-blur-sm">
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
           placeholder={datasetId ? "Ask about these videos..." : "No videos analyzed yet"}
-          className="flex-1 border rounded p-2 text-sm"
+          className="flex-1 border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-400 focus:border-transparent transition-all shadow-sm"
           disabled={streaming || !datasetId}
         />
         <button
           onClick={handleSend}
           disabled={streaming || !datasetId}
-          className="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700 disabled:opacity-50"
+          className="bg-gradient-to-r from-green-600 to-teal-600 text-white px-5 py-2 rounded-xl text-sm font-semibold shadow-md hover:shadow-lg transition-all disabled:opacity-50 transform hover:scale-105"
         >
           Send
         </button>

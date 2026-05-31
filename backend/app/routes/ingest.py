@@ -74,20 +74,26 @@ async def ingest_videos(payload: VideoInput):
                     segments = result.get("segments", [])
                     points = []
                     for i, seg in enumerate(segments):
+                        # Generate embedding for the segment text
                         emb = generate_embedding(seg["text"])
+                        # Build payload with all required fields
+                        payload = {
+                            "dataset_id": dataset_id,
+                            "video_id": video_id,
+                            "platform": platform,
+                            "chunk_id": i,
+                            "text": seg["text"],
+                            "start_time": seg["start"],
+                            "end_time": seg["end"],
+                            "semantic_features": seg.get("semantic_features", {})
+                        }
+                        # Also add title for easier identification (optional)
+                        if meta.get("title"):
+                            payload["title"] = meta["title"]
                         points.append(PointStruct(
                             id=str(uuid.uuid4()),
                             vector=emb,
-                            payload={
-                                "dataset_id": dataset_id,
-                                "video_id": video_id,
-                                "platform": platform,
-                                "chunk_id": i,
-                                "text": seg["text"],
-                                "start_time": seg["start"],
-                                "end_time": seg["end"],
-                                "semantic_features": seg.get("semantic_features", {})
-                            }
+                            payload=payload
                         ))
                     if points:
                         vector_store.client.upsert(
@@ -95,12 +101,13 @@ async def ingest_videos(payload: VideoInput):
                             points=points
                         )
                         chunk_count = len(points)
+                        logger.info(f"Stored {chunk_count} transcript chunks for video {video_id}")
 
                 ingested.append({
                     "video_id": video_id,
                     "platform": platform,
                     "url": url_str,
-                    "metadata": meta,   # now includes engagement_rate
+                    "metadata": meta,
                     "chunk_count": chunk_count
                 })
                 logger.info(f"Ingested {platform} video {video_id} into dataset {dataset_id}")
