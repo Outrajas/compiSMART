@@ -10,6 +10,7 @@ def _video_summary(v: dict) -> str:
     upload = v.get("upload_date")
     vpf = v.get("views_per_follower")
     hashtags = v.get("hashtags", [])
+    hook_text = v.get("hook_text")
 
     lines = [f'"{title}"']
     if creator:
@@ -32,6 +33,8 @@ def _video_summary(v: dict) -> str:
         lines.append(f"Upload: {upload}")
     if hashtags:
         lines.append(f"Tags: {', '.join(hashtags[:5])}")
+    if hook_text:
+        lines.append(f"Hook Text (First 60s): {hook_text[:300]}")
     return " | ".join(lines)
 
 def _data_completeness(videos: list[dict]) -> str:
@@ -238,6 +241,7 @@ def _build_deep_analytical_prompt(question: str, context: dict, history: str = "
 4. **Outlier detection.** Videos with extremely high Views/Follower are potential viral breakouts.
 5. **Confidence.** End each section with a confidence level (High/Medium/Low).
 6. **Views/Follower** is one of the most important metrics.
+7. **Never claim transcript evidence or hook text is unavailable** unless all retrieved chunks and hook text are completely empty. Use the provided "Hook Text (First 60s)" from metadata for hook analysis.
 
 **Data Quality:**
 {completeness}

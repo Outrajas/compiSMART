@@ -21,31 +21,42 @@ def init_db():
             video_id TEXT PRIMARY KEY,
             youtube_id TEXT UNIQUE,
             dataset_id TEXT,
-
             platform TEXT NOT NULL,
             title TEXT,
             creator TEXT,
-
             views INTEGER DEFAULT 0,
             likes INTEGER DEFAULT 0,
             comments INTEGER DEFAULT 0,
-
             duration INTEGER DEFAULT 0,
             upload_date TEXT,
             hashtags TEXT,
-
+            hook_text TEXT,
             follower_count INTEGER DEFAULT 0,
-
             transcript TEXT,
-
             engagement_rate REAL DEFAULT 0,
             views_per_follower REAL DEFAULT 0,
             hook_score REAL DEFAULT 0,
             transcript_coverage REAL DEFAULT 0,
-
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # =========================
+    # Automatic Migration Check
+    # =========================
+    # Check if hook_text column exists in the existing table
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(videos)")
+    columns = [row["name"] for row in cursor.fetchall()]
+    
+    if "hook_text" not in columns:
+        logger.info("Migrating database: Adding 'hook_text' column to 'videos' table.")
+        try:
+            conn.execute("ALTER TABLE videos ADD COLUMN hook_text TEXT")
+            conn.commit()
+            logger.info("Migration successful: 'hook_text' column added.")
+        except Exception as e:
+            logger.error(f"Migration failed: {e}")
 
     # =========================
     # Datasets
@@ -64,7 +75,6 @@ def init_db():
         CREATE TABLE IF NOT EXISTS dataset_videos (
             dataset_id TEXT NOT NULL,
             video_id TEXT NOT NULL,
-
             PRIMARY KEY (dataset_id, video_id)
         )
     """)

@@ -68,7 +68,6 @@ def plan_intent(question: str, has_dataset: bool, groq_client) -> dict:
         - style (str): "concise", "analytical", "verbatim"
         - intent (str): descriptive, for logging
     """
-    # If no dataset, we can't retrieve anything meaningful
     if not has_dataset:
         return {
             "needs_retrieval": False,
@@ -112,7 +111,6 @@ JSON:"""
             response_format={"type": "json_object"}
         )
         parsed = json.loads(response.choices[0].message.content)
-        # Ensure defaults
         return {
             "needs_retrieval": parsed.get("needs_retrieval", True),
             "style": parsed.get("style", "analytical"),
@@ -120,7 +118,6 @@ JSON:"""
         }
     except Exception as e:
         print(f"Intent planner error: {e}, falling back to retrieval=true")
-        # Fallback: always retrieve when dataset exists
         return {
             "needs_retrieval": True,
             "style": "analytical",
@@ -200,23 +197,33 @@ def retrieve_context(question: str, dataset_id: str, platform: str = "youtube", 
 
     chunks = []
     if needs_retrieval:
-        # Determine if user wants specific video
-        video_ids = None
+        # Determine dynamic limit based on intent keywords
+        keywords = ["quote", "dialogue", "conversation", "emotion", "humor", "hook", "compare"]
+        base_limit = 30 if any(k in question.lower() for k in keywords) else 10
+
+        # Determine target videos to loop over
+        video_ids = [v["video_id"] for v in all_metadata]
+        specific_video_ids = []
         for v in all_metadata:
             title = v.get("title", "")
             if title and title.lower() in question.lower():
-                video_ids = [v["video_id"]]
-                break
-        chunks = retrieve_chunks(
-            question,
-            dataset_id=dataset_id,
-            limit=10,
-            platform=platform,
-            time_max=None,
-            video_ids=video_ids
-        )
-        # Debug log
-        print(f"DEBUG: Retrieved {len(chunks)} chunks for query: {question[:50]}")
+                specific_video_ids.append(v["video_id"])
+        
+        target_videos = specific_video_ids if specific_video_ids else video_ids
+
+        # Per-video retrieval to prevent the winner video from dominating
+        for vid in target_videos:
+            vid_chunks = retrieve_chunks(
+                question,
+                dataset_id=dataset_id,
+                limit=base_limit,
+                platform=platform,
+                time_max=None,
+                video_ids=[vid]
+            )
+            chunks.extend(vid_chunks)
+
+        print(f"DEBUG: Retrieved {len(chunks)} chunks across {len(target_videos)} videos for query: {question[:50]}")
         if chunks:
             print(f"DEBUG: First chunk text: {chunks[0].get('text', '')[:100]}")
         else:

@@ -48,13 +48,23 @@ async def ingest_videos(payload: VideoInput):
                 # 2. Video ID
                 video_id = generate_video_id(platform)
 
-                # 3. Store metadata in SQLite (with dataset_id)
+                # 3. Transcript & Hook Text Extraction
+                hook_text = ""
+                segments = []
+                if platform == "youtube":
+                    result = transcript_service.extract_transcript(url_str, video_id=video_id)
+                    segments = result.get("segments", [])
+                    # Extract first 60 seconds
+                    hook_texts_list = [seg["text"] for seg in segments if seg.get("start", 0) <= 60.0]
+                    hook_text = " ".join(hook_texts_list).strip()
+
+                # 4. Store metadata in SQLite (with dataset_id and hook_text)
                 conn = get_connection()
                 conn.execute("""
                     INSERT INTO videos 
                     (video_id, platform, title, creator, views, likes, comments, 
-                     duration, upload_date, hashtags, follower_count, dataset_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     duration, upload_date, hashtags, follower_count, dataset_id, hook_text)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     video_id, platform,
                     meta.get("title"), meta.get("creator"),
@@ -62,16 +72,15 @@ async def ingest_videos(payload: VideoInput):
                     meta.get("duration"), meta.get("upload_date"),
                     json.dumps(meta.get("hashtags", [])),
                     meta.get("follower_count"),
-                    dataset_id
+                    dataset_id,
+                    hook_text
                 ))
                 conn.commit()
                 conn.close()
 
-                # 4. Transcript (only YouTube)
+                # 5. Qdrant Embeddings
                 chunk_count = 0
-                if platform == "youtube":
-                    result = transcript_service.extract_transcript(url_str, video_id=video_id)
-                    segments = result.get("segments", [])
+                if platform == "youtube" and segments:
                     points = []
                     for i, seg in enumerate(segments):
                         # Generate embedding for the segment text

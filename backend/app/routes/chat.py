@@ -63,12 +63,20 @@ def _process_chat(question: str, session_id: str, dataset_id: str, platform: str
     history = get_chat_history(session_id, limit=5)
     prompt = build_prompt(question, context, history, platform, intent=prompt_intent)
 
-    # Debug logs
-    logger.info(f"Prompt length: {len(prompt)} chars, ~{len(prompt)//4} tokens")
-    if context.get("chunks"):
-        logger.info(f"Retrieved {len(context['chunks'])} transcript chunks. First chunk text: {context['chunks'][0].get('text', '')[:100]}")
+    # 6. Structured Context Debug Logging
+    logger.info(
+        f"\n=================== RAG CONTEXT DEBUG ===================\n"
+        f"VIDEOS: {len(context.get('all_metadata', []))}\n"
+        f"ANALYTICS: {1 if context.get('analytics_summary') else 0}\n"
+        f"CHUNKS: {len(context.get('chunks', []))}\n"
+        f"=========================================================\n"
+    )
+    for c in context.get("chunks", [])[:10]:
+        logger.info(f"CHUNK ({c.get('video_id', 'unknown')}): {c.get('text', '')[:100]}")
 
-    # 6. Call LLM
+    logger.info(f"Prompt length: {len(prompt)} chars, ~{len(prompt)//4} tokens")
+
+    # 7. Call LLM
     try:
         response = client.chat.completions.create(
             model=settings.llm_model,
@@ -80,7 +88,7 @@ def _process_chat(question: str, session_id: str, dataset_id: str, platform: str
         logger.error(f"LLM call failed: {e}")
         answer = f"Sorry, I encountered an error: {str(e)}"
 
-    # 7. Follow‑up suggestion (optional, for analytical queries)
+    # 8. Follow‑up suggestion (optional, for analytical queries)
     follow_up = None
     if style == "analytical" and context.get("all_metadata"):
         try:
@@ -95,7 +103,7 @@ def _process_chat(question: str, session_id: str, dataset_id: str, platform: str
         except:
             pass
 
-    # 8. Update session memory
+    # 9. Update session memory
     update_session_state(
         session_id,
         last_intent=plan.get("intent", "unknown"),
@@ -103,11 +111,11 @@ def _process_chat(question: str, session_id: str, dataset_id: str, platform: str
         active_videos=[v["video_id"] for v in context.get("all_metadata", [])],
     )
 
-    # 9. Save to chat history
+    # 10. Save to chat history
     add_chat_message(session_id, "user", question)
     add_chat_message(session_id, "assistant", answer)
 
-    # 10. Build sources (only if metadata exists)
+    # 11. Build sources (only if metadata exists)
     sources = build_citations(context) if context.get("all_metadata") else []
 
     return answer, sources, follow_up
