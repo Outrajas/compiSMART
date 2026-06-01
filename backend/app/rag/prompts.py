@@ -11,8 +11,10 @@ def _video_summary(v: dict) -> str:
     vpf = v.get("views_per_follower")
     hashtags = v.get("hashtags", [])
     hook_text = v.get("hook_text")
+    platform = str(v.get("platform", "unknown")).upper()
 
-    lines = [f'"{title}"']
+    # Prepend explicit platform tags so the LLM identifies cross-platform scope instantly
+    lines = [f'[{platform}] "{title}"']
     if creator:
         lines.append(f"by {creator}")
     if followers:
@@ -34,38 +36,37 @@ def _video_summary(v: dict) -> str:
     if hashtags:
         lines.append(f"Tags: {', '.join(hashtags[:5])}")
     if hook_text:
-        lines.append(f"Hook Text (First 60s): {hook_text[:300]}")
+        lines.append(f"Hook Segment Text: {hook_text[:300]}")
     return " | ".join(lines)
 
 def _data_completeness(videos: list[dict]) -> str:
     lines = []
     for v in videos:
         title = v.get("title") or v.get("video_id")
+        platform = str(v.get("platform", "unknown")).upper()
         missing = []
         if not v.get("creator"): missing.append("creator")
-        if not v.get("views"): missing.append("views")
+        if not v.get("views") and platform == "YOUTUBE": missing.append("views")
         if not v.get("engagement_rate"): missing.append("engagement metrics")
-        if not v.get("hashtags"): missing.append("hashtags")
-        if not v.get("follower_count"): missing.append("follower count")
         if missing:
-            lines.append(f'⚠️ "{title}": missing {", ".join(missing)}.')
+            lines.append(f'⚠️ [{platform}] "{title}": missing {", ".join(missing)}.')
         else:
-            lines.append(f'✅ "{title}": complete.')
+            lines.append(f'✅ [{platform}] "{title}": complete records.')
     return "\n".join(lines)
 
 def _chunk_context(chunks: list[dict]) -> str:
     if not chunks:
         return ""
-    # Verify each chunk has 'text'
     for c in chunks:
         if "text" not in c:
             print(f"WARNING: Chunk missing 'text' field: {c.keys()}")
-    lines = ["## Transcript Segments (with timestamps and semantic features)"]
+    lines = ["## Cross-Platform Transcript Segments (partitioned with metadata markers)"]
     for c in chunks:
         title = c.get("title", c.get("video_id", "?"))
         start = c.get("start_time")
         end = c.get("end_time")
-        text = c.get("text", "")  # this is the critical field
+        text = c.get("text", "")
+        platform = str(c.get("platform", "unknown")).upper()
         if not text:
             text = "[MISSING TEXT]"
         features = c.get("semantic_features", {})
@@ -75,27 +76,28 @@ def _chunk_context(chunks: list[dict]) -> str:
         emotion = features.get("emotion", "")
         time_str = f"[{start:.1f}s - {end:.1f}s]" if start is not None and end is not None else ""
         tags = " ".join(filter(None, [question, conflict, f"emotion:{emotion}" if emotion else ""])).strip()
-        extra = f" (hook={hook}{', ' + tags if tags else ''})"
+        extra = f" (platform={platform}, hook={hook}{', ' + tags if tags else ''})"
         lines.append(f"- {title} {time_str}{extra}: {text}")
     return "\n".join(lines)
 
 def _verbatim_chunk_context(chunks: list[dict]) -> str:
     if not chunks:
         return "No transcript chunks available."
-    lines = ["## Verbatim Transcript Lines (timestamp + exact dialogue)"]
+    lines = ["## Verbatim Transcript Lines (platform contextual anchors)"]
     for c in chunks:
         start = c.get("start_time")
         text = c.get("text", "")
+        platform = str(c.get("platform", "unknown")).upper()
         if start is not None and text:
-            lines.append(f"[{start:.1f}s] {text}")
+            lines.append(f"[{platform}][{start:.1f}s] {text}")
         elif text:
-            lines.append(text)
+            lines.append(f"[{platform}] {text}")
     return "\n".join(lines)
 
 def _coverage_text(semantic_profiles: list[dict]) -> str:
     if not semantic_profiles:
         return ""
-    lines = ["## Transcript Coverage"]
+    lines = ["## Transcript Coverage Mapping"]
     for p in semantic_profiles:
         cov = p.get("transcript_coverage", 0)
         segs = p.get("total_segments", 0)
@@ -110,14 +112,10 @@ def _winners_block(analytics_summary: dict, semantic_profiles: list[dict]) -> st
         winners.append(f"Views Winner: **{analytics_summary['most_views_title']}** ({analytics_summary['most_views_value']:,})")
     if semantic_profiles:
         sorted_hooks = sorted(semantic_profiles, key=lambda x: x["hook_score"], reverse=True)
-        winners.append(f"Hook Score Winner: **{sorted_hooks[0]['title']}** ({sorted_hooks[0]['hook_score']}/10)")
-    if analytics_summary.get("outlier_videos"):
-        winners.append(f"⚠️ Viral Outliers (high Views/Follower): {', '.join(analytics_summary['outlier_videos'])}")
-    if analytics_summary.get("best_views_per_follower_title"):
-        winners.append(f"Efficiency Winner (Views/Follower): **{analytics_summary['best_views_per_follower_title']}** ({analytics_summary['best_views_per_follower_value']}x)")
+        if sorted_hooks:
+            winners.append(f"Hook Score Winner: **{sorted_hooks[0]['title']}** ({sorted_hooks[0]['hook_score']}/10)")
     return "\n".join(winners)
 
-# ----- MINIMAL FACT PROMPT -----
 def _build_minimal_fact_prompt(question: str, context: dict, history: str = "") -> str:
     all_metadata = context.get("all_metadata", [])
     if not all_metadata:
@@ -126,40 +124,24 @@ def _build_minimal_fact_prompt(question: str, context: dict, history: str = "") 
     best = max(all_metadata, key=lambda v: v.get("engagement_rate") or 0)
     title = best.get("title", "Unknown")
     engagement = best.get("engagement_rate")
-    views = best.get("views")
-    creator = best.get("creator")
-    vpf = best.get("views_per_follower")
-    likes = best.get("likes")
-    comments = best.get("comments")
-
-    snapshot = f"Top video: {title}"
-    if creator:
-        snapshot += f" by {creator}"
+    platform = str(best.get("platform", "unknown")).upper()
+    
+    snapshot = f"Top Performing Unified Asset: [{platform}] {title}"
     if engagement is not None:
-        snapshot += f" (Engagement {engagement:.2f}%)"
-    if views:
-        snapshot += f", {views:,} views"
-    if vpf:
-        snapshot += f", Views/Follower {vpf:.1f}x"
-    if likes:
-        snapshot += f", {likes:,} likes"
-    if comments:
-        snapshot += f", {comments:,} comments"
+        snapshot += f" (Engagement Metric Strength: {engagement:.2f}%)"
 
     history_block = f"History:\n{history}\n" if history else ""
     return f"""{history_block}Data snapshot: {snapshot}
 
 Question: {question}
-Short, factual answer (1-2 sentences):"""
+Short, factual cross-platform answer (1-2 sentences):"""
 
-# ----- CASUAL CHAT -----
 def _build_casual_prompt(question: str, history: str = "") -> str:
     return f"""Conversation history:
 {history}
 User: {question}
-Assistant (friendly, concise, no data):"""
+Assistant (friendly, concise, cross-platform aware):"""
 
-# ----- GENERAL KNOWLEDGE -----
 def _build_general_qa_prompt(question: str, history: str = "") -> str:
     return f"""Answer this general knowledge question accurately and concisely. No dataset involved.
 
@@ -168,16 +150,15 @@ History:
 User: {question}
 Answer:"""
 
-# ----- COMPARISON PROMPT (compact) -----
 def _build_comparison_prompt(question: str, context: dict, history: str = "") -> str:
     all_metadata = context.get("all_metadata", [])
     if not all_metadata:
         return f"Question: {question}\nNo videos loaded."
 
     summaries = "\n".join([_video_summary(v) for v in all_metadata])
-    return f"""Compare the videos below. Answer briefly (2-3 sentences) focusing on engagement rate.
+    return f"""Compare the cross-platform media matrix below. Answer briefly focusing directly on the platform discrepancies.
 
-Data:
+Data Elements:
 {summaries}
 
 History:
@@ -186,30 +167,24 @@ History:
 Question: {question}
 Answer:"""
 
-# ----- TRANSCRIPT QUERY PROMPT (verbatim) -----
 def _build_transcript_query_prompt(question: str, context: dict, history: str = "") -> str:
     chunks = context.get("chunks", [])
     all_metadata = context.get("all_metadata", [])
     if not chunks:
-        # Provide metadata but state no transcripts
-        video_titles = [v.get("title", v["video_id"]) for v in all_metadata]
-        return f"""User asked for exact dialogues from videos. However, no transcript chunks were found in the database for the requested videos: {', '.join(video_titles)}.
-
-Please respond: "No transcript segments available for the requested video(s). I can only provide metadata and analytics."
-
-History:
-{history}
+        video_titles = [f"[{str(v.get('platform')).upper()}] {v.get('title', v['video_id'])}" for v in all_metadata]
+        return f"""User requested raw textual elements from multiple assets. However, no valid platform segment structures were found: {', '.join(video_titles)}.
+Please respond: "No valid transcript segments available for the cross-platform request. I can only audit metadata variables."
+History: {history}
 """
     verbatim = _verbatim_chunk_context(chunks)
-    return f"""You are a transcript retrieval assistant. Answer the user's request using ONLY the verbatim transcript lines below. Do not add explanations, analysis, or metadata unless specifically asked.
+    return f"""You are a cross-platform transcript query engine. Answer using ONLY the verbatim lines provided below.
 
 {verbatim}
 
 User question: {question}
 
-Respond with the exact lines (timestamp + dialogue) as listed above, grouped by video if multiple. If the user asks for "more dialogues", provide additional chunks from the same set. Do not hallucinate."""
+Group quotes by platform identity explicitly ([YOUTUBE] vs [INSTAGRAM]). Do not hallucinate timelines or phrases."""
 
-# ----- DEEP ANALYTICAL PROMPT (includes transcripts) -----
 def _build_deep_analytical_prompt(question: str, context: dict, history: str = "", platform: str = "youtube") -> str:
     all_metadata = context.get("all_metadata", [])
     chunks = context.get("chunks", [])
@@ -219,48 +194,44 @@ def _build_deep_analytical_prompt(question: str, context: dict, history: str = "
 
     completeness = _data_completeness(all_metadata)
     summaries = "\n".join([_video_summary(v) for v in all_metadata]) if all_metadata else "No videos."
-    chunks_block = _chunk_context(chunks) if chunks else "## No transcript chunks available. Answer using metadata only."
+    chunks_block = _chunk_context(chunks) if chunks else "## No platform transcript chunks available. Evaluating via metadata store metrics."
     coverage_block = _coverage_text(semantic_profiles)
     winners = _winners_block(analytics_summary, semantic_profiles)
 
-    history_block = f"## Conversation History\n{history}\n" if history else ""
+    history_block = f"## Conversation History Context\n{history}\n" if history else ""
 
-    system = f"""You are a rigorous creator‑growth analyst for {platform.capitalize()}. **Every claim must be supported by the provided data. Never speculate or invent structure.**
+    system = """You are a rigorous creator-growth analyst specialized in cross-platform media conversion dynamics (YouTube vs Instagram). 
 
-**Data Available:**
-- **Pre‑computed Winners:** {winners or 'None'}
-- **Semantic Scores (0‑10):** {hook_summary or 'None'}
-- **Transcript Coverage:** {coverage_block or 'None'}
-- **Metadata summaries:** below.
-- **Transcript segments:** attached if relevant.
-
-**Strict Rules:**
-1. **No fake timeline.** Do NOT describe “beginning”, “middle”, or “end” unless transcript coverage exceeds 80% AND you have segments spanning the full duration. If coverage < 30%, explicitly say “Insufficient data for timeline analysis (coverage X%)”. Even if coverage is high, only describe what is directly visible in the provided segments.
-2. **Evidence‑only reasoning.** When comparing, cite exact metrics: engagement rate, views/follower, hook scores, semantic features. Do not use vague phrases.
-3. **Hook analysis.** Compare hook scores and, if coverage allows, point to semantic features.
-4. **Outlier detection.** Videos with extremely high Views/Follower are potential viral breakouts.
-5. **Confidence.** End each section with a confidence level (High/Medium/Low).
-6. **Views/Follower** is one of the most important metrics.
-7. **Never claim transcript evidence or hook text is unavailable** unless all retrieved chunks and hook text are completely empty. Use the provided "Hook Text (First 60s)" from metadata for hook analysis.
-
-**Data Quality:**
-{completeness}
+**Strict Operational Constraints:**
+1. **Differentiate Platform Origins Exclusively**: You are analyzing a mixed platform dataset. You must clearly state what belongs to YouTube and what belongs to Instagram. Never mix up metadata attributes.
+2. **Platform Performance Auditing Rules**: 
+   - YouTube calculates Engagement Rate relative to Views.
+   - Instagram calculations evaluate Engagement using absolute interaction volume weights because View counts are subject to profile access layers. Acknowledge this platform metric schema change explicitly if comparing performance.
+3. **Evidence Extraction Protection**: Every assertion must link back to specific platform data tokens or Hook Segment Texts. Never claim evidence is missing unless all retrieved blocks for that platform are blank.
+4. **Confidence Node**: Finalize every evaluation section with an explicit analytical certainty score (High/Medium/Low).
 """
 
     prompt = f"""{system}
 
-{history_block}## User Question
-{question}
+{history_block}## Data Architecture Ingested
+- **Cross-Platform Winners**: {winners or 'None'}
+- **Calibrated Hook Breakdown**: {hook_summary or 'None'}
+- **Coverage Summary**: {coverage_block or 'None'}
 
+### Full Ingested Asset Metrics List
 {summaries}
 
 {chunks_block}
-{coverage_block}
+
+---
+## Target Query Task
+User Question: {question}
+Data Completeness Baseline:
+{completeness}
 
 Answer:"""
     return prompt
 
-# ----- MAIN DISPATCH -----
 def build_prompt(question: str, context: dict, history: str = "", platform: str = "youtube", intent: str = "dataset_deep") -> str:
     if intent == "casual":
         return _build_casual_prompt(question, history)
@@ -272,5 +243,5 @@ def build_prompt(question: str, context: dict, history: str = "", platform: str 
         return _build_comparison_prompt(question, context, history)
     elif intent == "transcript_query":
         return _build_transcript_query_prompt(question, context, history)
-    else:  # dataset_deep
+    else:
         return _build_deep_analytical_prompt(question, context, history, platform)

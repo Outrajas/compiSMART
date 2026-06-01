@@ -14,7 +14,7 @@ def init_db():
     conn = get_connection()
 
     # =========================
-    # Videos
+    # Videos / Reels Table
     # =========================
     conn.execute("""
         CREATE TABLE IF NOT EXISTS videos (
@@ -32,6 +32,9 @@ def init_db():
             hashtags TEXT,
             hook_text TEXT,
             follower_count INTEGER DEFAULT 0,
+            following_count INTEGER DEFAULT 0,
+            posts_count INTEGER DEFAULT 0,
+            bio TEXT,
             transcript TEXT,
             engagement_rate REAL DEFAULT 0,
             views_per_follower REAL DEFAULT 0,
@@ -44,19 +47,26 @@ def init_db():
     # =========================
     # Automatic Migration Check
     # =========================
-    # Check if hook_text column exists in the existing table
     cursor = conn.cursor()
     cursor.execute("PRAGMA table_info(videos)")
     columns = [row["name"] for row in cursor.fetchall()]
     
-    if "hook_text" not in columns:
-        logger.info("Migrating database: Adding 'hook_text' column to 'videos' table.")
-        try:
-            conn.execute("ALTER TABLE videos ADD COLUMN hook_text TEXT")
-            conn.commit()
-            logger.info("Migration successful: 'hook_text' column added.")
-        except Exception as e:
-            logger.error(f"Migration failed: {e}")
+    migrations = {
+        "hook_text": "ALTER TABLE videos ADD COLUMN hook_text TEXT",
+        "following_count": "ALTER TABLE videos ADD COLUMN following_count INTEGER DEFAULT 0",
+        "posts_count": "ALTER TABLE videos ADD COLUMN posts_count INTEGER DEFAULT 0",
+        "bio": "ALTER TABLE videos ADD COLUMN bio TEXT"
+    }
+
+    for col, query in migrations.items():
+        if col not in columns:
+            logger.info(f"Migrating database: Adding '{col}' column to 'videos' table.")
+            try:
+                conn.execute(query)
+                conn.commit()
+                logger.info(f"Migration successful: '{col}' column added.")
+            except Exception as e:
+                logger.error(f"Migration failed for column {col}: {e}")
 
     # =========================
     # Datasets
@@ -114,7 +124,6 @@ def init_db():
 
 def add_chat_message(session_id: str, role: str, content: str):
     conn = get_connection()
-
     conn.execute(
         """
         INSERT INTO chat_messages
@@ -123,14 +132,12 @@ def add_chat_message(session_id: str, role: str, content: str):
         """,
         (session_id, role, content)
     )
-
     conn.commit()
     conn.close()
 
 
 def get_chat_history(session_id: str, limit: int = 20) -> str:
     conn = get_connection()
-
     rows = conn.execute(
         """
         SELECT role, content
@@ -141,17 +148,14 @@ def get_chat_history(session_id: str, limit: int = 20) -> str:
         """,
         (session_id, limit)
     ).fetchall()
-
     conn.close()
 
     history = []
-
     for row in rows:
         if row["role"] == "user":
             history.append(f"User: {row['content']}")
         else:
             history.append(f"Assistant: {row['content']}")
-
     return "\n".join(history)
 
 

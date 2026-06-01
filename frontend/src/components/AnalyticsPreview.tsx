@@ -1,173 +1,103 @@
-// frontend/src/components/AnalyticsPreview.tsx
 import { useEffect, useState } from 'react';
-import { getAnalyticsSummary, getAnalyticsRankings, getSemanticProfiles } from '../services/api';
-import type { AnalyticsSummary, VideoAnalytics, SemanticProfile } from '../types';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { getAnalyticsRankings, getAnalyticsSummary } from '../services/api';
+import type { VideoAnalytics, AnalyticsSummary } from '../types';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface Props {
-  platform: string;
+  platform: 'youtube' | 'instagram';
   datasetId: string;
 }
 
 export default function AnalyticsPreview({ platform, datasetId }: Props) {
-  const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [rankings, setRankings] = useState<VideoAnalytics[]>([]);
-  const [profiles, setProfiles] = useState<SemanticProfile[]>([]);
+  const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getAnalyticsSummary(datasetId).then(setSummary);
-    getAnalyticsRankings(datasetId).then(setRankings);
-    getSemanticProfiles(datasetId).then(setProfiles);
-  }, [datasetId]);
+    async function loadAnalytics() {
+      if (!datasetId) return;
+      setLoading(true);
+      try {
+        const rData = await getAnalyticsRankings(datasetId);
+        const sData = await getAnalyticsSummary(datasetId);
+        setRankings(rData);
+        setSummary(sData);
+      } catch (err) {
+        console.error("Error retrieving analytics preview structure:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadAnalytics();
+  }, [datasetId, platform]);
 
-  if (!summary || summary.count === 0) return null;
+  if (loading) return <div className="py-12 text-center text-white/40 font-mono animate-pulse">Computing audit visualizations...</div>;
+  if (rankings.length === 0) return null;
 
-  const chartData = rankings.map(v => ({
-    name: v.title?.substring(0, 25) || v.video_id,
-    engagement: v.engagement_rate
-  }));
-
-  const hookChartData = profiles.map(p => ({
-    name: p.title?.substring(0, 25) || p.video_id,
-    hookScore: p.hook_score
-  }));
-
-  const coverageData = profiles.map(p => ({
-    name: p.title?.substring(0, 25) || p.video_id,
-    coverage: p.transcript_coverage
-  }));
-
-  const vpfData = rankings.map(v => ({
-    name: v.title?.substring(0, 25) || v.video_id,
-    vpf: v.views_per_follower || 0
-  }));
-
-  const breakdownRows = profiles.map(p => ({
-    title: p.title?.substring(0, 30) || p.video_id,
-    ...p.hook_breakdown
-  }));
+  // Filter out invalid zero metrics for cleaner graph visualization layout rules
+  const hasFollowerData = rankings.some(r => r.follower_count && r.follower_count > 0);
+  const themeColor = platform === 'youtube' ? '#dc2626' : '#c084fc';
 
   return (
-    <div className="mb-8 space-y-6 animate-fade-in">
-      <h2 className="text-2xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent">Analytics Snapshot</h2>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="glass-card p-4 text-center transition-all hover:shadow-xl">
-          <div className="text-xs text-gray-500 uppercase tracking-wider">Videos</div>
-          <div className="text-3xl font-extrabold text-indigo-700">{summary.count}</div>
+    <div className="space-y-8 animate-fade-in">
+      {/* Dynamic Summary Cards Snapshot Header Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="glass-card p-6 bg-white/5 border border-white/10 rounded-2xl">
+          <span className="text-xs text-white/40 uppercase tracking-widest font-mono">Analyzed Content</span>
+          <div className="text-3xl font-black mt-1">{rankings.length} Assets</div>
         </div>
-        <div className="glass-card p-4 text-center transition-all hover:shadow-xl">
-          <div className="text-xs text-gray-500 uppercase tracking-wider">Best Engagement</div>
-          <div className="text-2xl font-bold text-amber-600">{summary.best_engagement_value}%</div>
-          <div className="text-xs truncate text-gray-500">{summary.best_engagement}</div>
+        <div className="glass-card p-6 bg-white/5 border border-white/10 rounded-2xl">
+          <span className="text-xs text-white/40 uppercase tracking-widest font-mono">Max Engagement</span>
+          <div className="text-3xl font-black mt-1 text-pink-400">
+            {summary?.best_engagement_value ? `${Number(summary.best_engagement_value).toFixed(2)}%` : `${Math.max(...rankings.map(r=>r.engagement_rate||0)).toFixed(2)}%`}
+          </div>
         </div>
-        <div className="glass-card p-4 text-center transition-all hover:shadow-xl">
-          <div className="text-xs text-gray-500 uppercase tracking-wider">Most Views</div>
-          <div className="text-2xl font-bold text-emerald-600">{summary.most_views_value?.toLocaleString()}</div>
-          <div className="text-xs truncate text-gray-500">{summary.most_views_title}</div>
+        <div className="glass-card p-6 bg-white/5 border border-white/10 rounded-2xl">
+          <span className="text-xs text-white/40 uppercase tracking-widest font-mono">Highest View Tracker</span>
+          <div className="text-3xl font-black mt-1 text-blue-400">
+            {summary?.most_views_value && summary.most_views_value > 0 ? summary.most_views_value.toLocaleString() : Math.max(...rankings.map(r=>r.views||0)).toLocaleString()}
+          </div>
         </div>
-        <div className="glass-card p-4 text-center transition-all hover:shadow-xl">
-          <div className="text-xs text-gray-500 uppercase tracking-wider">Avg Engagement</div>
-          <div className="text-2xl font-bold text-purple-600">{summary.average_engagement}%</div>
+        <div className="glass-card p-6 bg-white/5 border border-white/10 rounded-2xl">
+          <span className="text-xs text-white/40 uppercase tracking-widest font-mono">Average Density</span>
+          <div className="text-3xl font-black mt-1 text-amber-400">
+            {(rankings.reduce((acc, r) => acc + (r.engagement_rate || 0), 0) / rankings.length).toFixed(2)}%
+          </div>
         </div>
       </div>
 
-      {summary.outlier_videos && summary.outlier_videos.length > 0 && (
-        <div className="bg-gradient-to-r from-yellow-50 to-amber-50 border-l-4 border-yellow-400 rounded-xl p-3 text-sm text-yellow-800 shadow-sm">
-          ⚡ Viral outlier (extremely high Views/Follower): {summary.outlier_videos.join(', ')}
-        </div>
-      )}
-
-      {chartData.length > 1 && (
-        <div className="glass-card p-5 transition-all hover:shadow-md">
-          <h3 className="text-md font-semibold mb-3 flex items-center gap-2">📊 Engagement Comparison</h3>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="name" tick={{fontSize: 10}} angle={-20} textAnchor="end" height={60} />
-              <YAxis unit="%" />
-              <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }} />
-              <Bar dataKey="engagement" fill="#8b5cf6" radius={[6,6,0,0]} name="Engagement %" />
+      {/* Primary Analytical Graph Visual Blocks */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        {/* Chart A: Engagement Rate */}
+        <div className="glass-card p-6 bg-white/5 border border-white/10 rounded-2xl">
+          <h4 className="text-sm font-bold uppercase tracking-wider text-white/70 mb-4">Engagement Rate Audit (%)</h4>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={rankings}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis dataKey="creator" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} />
+              <YAxis tick={{ fill: 'rgba(255,255,255,0.5)' }} />
+              <Tooltip contentStyle={{ backgroundColor: '#111', border: '1px solid rgba(255,255,255,0.1)' }} />
+              <Bar dataKey="engagement_rate" fill="#f43f5e" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
-      )}
 
-      {vpfData.length > 1 && (
-        <div className="glass-card p-5 transition-all hover:shadow-md">
-          <h3 className="text-md font-semibold mb-3 flex items-center gap-2">📈 Views per Follower</h3>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={vpfData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="name" tick={{fontSize: 10}} angle={-20} textAnchor="end" height={60} />
-              <YAxis />
-              <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }} />
-              <Bar dataKey="vpf" fill="#ec4899" radius={[6,6,0,0]} name="Views/Follower" />
+        {/* Chart B: Dynamic Efficiency or Views per Follower tracking toggle */}
+        <div className="glass-card p-6 bg-white/5 border border-white/10 rounded-2xl">
+          <h4 className="text-sm font-bold uppercase tracking-wider text-white/70 mb-4">
+            {hasFollowerData ? "Views Per Follower Multiplier" : "Absolute Verified Reach (Views)"}
+          </h4>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={rankings}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis dataKey="creator" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} />
+              <YAxis tick={{ fill: 'rgba(255,255,255,0.5)' }} />
+              <Tooltip contentStyle={{ backgroundColor: '#111', border: '1px solid rgba(255,255,255,0.1)' }} />
+              <Bar dataKey={hasFollowerData ? "views_per_follower" : "views"} fill={themeColor} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
-      )}
-
-      {hookChartData.length > 0 && (
-        <div className="glass-card p-5 transition-all hover:shadow-md">
-          <h3 className="text-md font-semibold mb-3 flex items-center gap-2">🎣 Hook Scores (0-10)</h3>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={hookChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="name" tick={{fontSize: 10}} angle={-20} textAnchor="end" height={60} />
-              <YAxis domain={[0, 10]} />
-              <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }} />
-              <Bar dataKey="hookScore" fill="#f59e0b" radius={[6,6,0,0]} name="Hook Score" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {coverageData.length > 0 && (
-        <div className="glass-card p-5 transition-all hover:shadow-md">
-          <h3 className="text-md font-semibold mb-3 flex items-center gap-2">📄 Transcript Coverage (%)</h3>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={coverageData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="name" tick={{fontSize: 10}} angle={-20} textAnchor="end" height={60} />
-              <YAxis unit="%" />
-              <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }} />
-              <Bar dataKey="coverage" fill="#06b6d4" radius={[6,6,0,0]} name="Coverage %" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {breakdownRows.length > 0 && (
-        <div className="glass-card p-5 overflow-x-auto transition-all hover:shadow-md">
-          <h3 className="text-md font-semibold mb-3 flex items-center gap-2">🧩 Hook Score Breakdown</h3>
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-left border-b border-gray-200">
-                <th className="py-2">Video</th>
-                <th>Question</th>
-                <th>Conflict</th>
-                <th>Emotion</th>
-                <th>Humor</th>
-                <th>Curiosity</th>
-                <th>CTA</th>
-               </tr>
-            </thead>
-            <tbody>
-              {breakdownRows.map((r, i) => (
-                <tr key={i} className="border-b border-gray-100 hover:bg-gray-50 transition">
-                  <td className="py-2 font-medium">{r.title}</td>
-                  <td>{r.question}%</td>
-                  <td>{r.conflict}%</td>
-                  <td>{r.emotion}/10</td>
-                  <td>{r.humor}/10</td>
-                  <td>{r.curiosity}/10</td>
-                  <td>{r.cta}/10</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
