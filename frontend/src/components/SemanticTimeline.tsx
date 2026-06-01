@@ -18,15 +18,15 @@ export default function SemanticTimeline({ datasetId }: Props) {
 
   return (
     <div className="glass-card p-5 mb-8 transition-all hover:shadow-md">
-      <h3 className="text-md font-semibold mb-4 flex items-center gap-2">📈 Semantic Strength by Video</h3>
+      <h3 className="text-md font-semibold mb-4 flex items-center gap-2 text-white">📈 Semantic Strength by Video</h3>
       <div className="space-y-4">
         {profiles.map((p, idx) => (
           <div key={p.video_id} className="animate-fade-in" style={{ animationDelay: `${idx * 80}ms` }}>
             <div className="flex justify-between text-xs mb-1">
-              <span className="font-medium truncate w-2/3 text-gray-700">{p.title}</span>
-              <span className="font-mono font-bold text-amber-600">Hook {p.hook_score}/10</span>
+              <span className="font-medium truncate w-2/3 text-white/90">{p.title}</span>
+              <span className="font-mono font-bold text-amber-300">Hook {p.hook_score}/10</span>
             </div>
-            <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden shadow-inner">
+            <div className="w-full bg-white/20 rounded-full h-2.5 overflow-hidden shadow-inner">
               <div
                 className="bg-gradient-to-r from-amber-400 to-orange-500 h-2.5 rounded-full transition-all duration-700 ease-out"
                 style={{ width: `${p.hook_score * 10}%` }}
