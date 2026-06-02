@@ -5,10 +5,16 @@ import ChatSidebar from '../components/ChatSidebar';
 import AnalyticsPreview from '../components/AnalyticsPreview';
 import SemanticTimeline from '../components/SemanticTimeline';
 import CrossPlatformComparison from '../components/CrossPlatformComparison';
-import { addVideoToDataset, removeVideoFromDataset } from '../services/api';
+import { addVideoToDataset, removeVideoFromDataset, setApiCredentials, clearApiCredentials } from '../services/api';
 import type { VideoMetadata } from '../types';
 
 export default function Home() {
+  // Session Authentication Sandbox State Controllers
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [usernameInput, setUsernameInput] = useState<string>('');
+  const [passwordInput, setPasswordInput] = useState<string>('');
+  const [loginError, setLoginError] = useState<string>('');
+
   const [activeVideos, setActiveVideos] = useState<VideoMetadata[]>([]);
   const [currentDatasetId, setCurrentDatasetId] = useState<string | null>(null);
   const [selectedVideoIds, setSelectedVideoIds] = useState<string[]>([]);
@@ -16,6 +22,7 @@ export default function Home() {
   const [chatSessionId, setChatSessionId] = useState(`session-${Date.now()}`);
   const particleContainerRef = useRef<HTMLDivElement>(null);
 
+  // Unified Background Particle Engine (100% Intact and operational during login)
   useEffect(() => {
     const container = particleContainerRef.current;
     if (!container) return;
@@ -79,14 +86,37 @@ export default function Home() {
     };
   }, []);
 
+  // Secure credential confirmation routine verification handler
+  const handleLoginSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError('');
+
+    // Verification check matching the rigid backend demonstration credentials
+    if (usernameInput === 'admin' && passwordInput === 'techsolve_secure_2026') {
+      setApiCredentials(usernameInput, passwordInput);
+      setIsAuthenticated(true);
+    } else {
+      setLoginError('Access Denied: Invalid private credentials matrix values.');
+    }
+  };
+
+  const handleLogout = () => {
+    clearApiCredentials();
+    setIsAuthenticated(false);
+    setUsernameInput('');
+    setPasswordInput('');
+    setActiveVideos([]);
+    setCurrentDatasetId(null);
+    setSelectedVideoIds([]);
+    setChatOpen(false);
+  };
+
   const handleIngested = useCallback(async (vids: VideoMetadata[], datasetId: string) => {
     if (!currentDatasetId) {
-      // First ingestion initialize session truth completely
       setCurrentDatasetId(datasetId);
       setActiveVideos(vids);
       setSelectedVideoIds(vids.map(v => v.video_id));
     } else {
-      // Append videos cumulatively on top of the current session persistent memory
       for (const v of vids) {
         try {
           await addVideoToDataset(currentDatasetId, v.video_id);
@@ -120,6 +150,68 @@ export default function Home() {
     setChatSessionId(`session-${Date.now()}`);
   }, []);
 
+  // --- RENDERING LAYER SECURITY GUARD INTERCEPT ---
+  if (!isAuthenticated) {
+    return (
+      <div className="relative min-h-screen text-white flex items-center justify-center font-sans">
+        <div className="bg-video-container fixed inset-0 z-0">
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-black to-slate-900"></div>
+        </div>
+        <div ref={particleContainerRef} className="fixed inset-0 pointer-events-none z-10"></div>
+        
+        <div className="relative z-20 w-full max-w-md mx-4 animate-fade-in">
+          <div className="glass-card p-8 rounded-3xl bg-white/5 border border-white/10 shadow-2xl backdrop-blur-2xl text-center space-y-6">
+            <div>
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-black text-2xl mx-auto shadow-lg shadow-indigo-500/20 mb-3">
+                C
+              </div>
+              <h1 className="text-3xl font-black tracking-tight text-white">CompiSmart Engine</h1>
+              <p className="text-xs text-white/40 font-mono mt-1">Private Deployment Portal</p>
+            </div>
+
+            <form onSubmit={handleLoginSubmit} className="space-y-4 text-left">
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase tracking-wider text-white/50 font-mono">User Identifier</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Enter credential ID"
+                  value={usernameInput}
+                  onChange={(e) => setUsernameInput(e.target.value)}
+                  className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm text-white placeholder-white/20 focus:ring-1 focus:ring-indigo-500 focus:outline-none font-mono"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase tracking-wider text-white/50 font-mono">Secret Token Phrase</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="••••••••••••"
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm text-white placeholder-white/20 focus:ring-1 focus:ring-indigo-500 focus:outline-none font-mono"
+                />
+              </div>
+
+              {loginError && (
+                <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl text-xs font-mono font-medium text-center">
+                  {loginError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="w-full py-3.5 rounded-xl font-black bg-white text-black hover:scale-[1.02] active:scale-95 transition-all shadow-xl text-center"
+              >
+                Authenticate Instance
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const ytCount = activeVideos.filter(v => v.platform.toLowerCase() === 'youtube').length;
   const igCount = activeVideos.filter(v => v.platform.toLowerCase() === 'instagram').length;
 
@@ -145,6 +237,12 @@ export default function Home() {
                   CompiSmart
                 </h1>
              </div>
+             <button
+               onClick={handleLogout}
+               className="bg-white/5 hover:bg-rose-500/20 border border-white/10 hover:border-rose-500/30 font-mono text-xs px-3 py-1.5 rounded-xl text-white/60 hover:text-rose-400 transition"
+             >
+               Logout Session
+             </button>
           </header>
 
           <div className="max-w-6xl mx-auto">
