@@ -4,12 +4,21 @@ from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, Fi
 from app.services.embedding_service import generate_embedding
 from app.core.logger import logger
 
+import os
+
 class VectorStoreService:
     COLLECTION_NAME = "video_chunks"
     VECTOR_SIZE = 384
 
-    def __init__(self, host="localhost", port=6333):
-        self.client = QdrantClient(host=host, port=port)
+    def __init__(
+        self,
+        host=os.getenv("QDRANT_HOST", "qdrant"),
+        port=int(os.getenv("QDRANT_PORT", "6333"))
+    ):
+        self.client = QdrantClient(
+            host=host,
+            port=port
+        )
         self._ensure_collection()
 
     def _ensure_collection(self):
