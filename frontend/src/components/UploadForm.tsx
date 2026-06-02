@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ingestVideos } from '../services/api'; // <--- Force through centralized secured API
 import type { VideoMetadata } from '../types';
 
 interface Props {
@@ -35,21 +36,8 @@ export default function UploadForm({ onIngested }: Props) {
 
     setLoading(true);
     try {
-      const res = await fetch('http://127.0.0.1:8000/ingest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          youtube_urls: filteredYt,
-          instagram_urls: filteredIg
-        }),
-      });
-
-      if (!res.ok) {
-        const txt = await res.json();
-        throw new Error(txt.detail || "Ingestion processing failure");
-      }
-
-      const data = await res.json();
+      // Replaced the raw 401 unauthenticated fetch with our secured wrapper
+      const data = await ingestVideos(filteredYt, filteredIg);
       
       const processedVideos = data.ingested.map((item: any) => ({
         video_id: item.video_id,

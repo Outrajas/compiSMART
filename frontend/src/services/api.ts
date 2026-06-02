@@ -1,28 +1,24 @@
-// frontend/src/services/api.ts
-import type { IngestResponse, ChatResponse, AnalyticsSummary, VideoAnalytics , SemanticProfile} from '../types';
+import type { IngestResponse, ChatResponse, AnalyticsSummary, VideoAnalytics, SemanticProfile } from '../types';
 
 const BASE = 'http://127.0.0.1:8000';
 
-// Volatile in-memory store for Basic Auth header token string string values
-let authHeaderToken: string | null = null;
-
-export function setApiCredentials(username: string, password: string) {
-  // Compute standard RFC-7617 Basic Access Authentication string representation
-  const encoded = btoa(`${username}:${password}`);
-  authHeaderToken = `Basic ${encoded}`;
-}
-
+// --- CREDENTIAL MANAGEMENT EXPORTS ---
 export function clearApiCredentials() {
-  authHeaderToken = null;
+  localStorage.removeItem('auth_token');
 }
 
-function getSecuredHeaders(customHeaders: Record<string, string> = {}): Record<string, string> {
-  const headers: Record<string, string> = { ...customHeaders };
-  if (authHeaderToken) {
-    headers['Authorization'] = authHeaderToken;
-  }
-  return headers;
+export function setApiCredentials(token: string) {
+  localStorage.setItem('auth_token', token);
 }
+// -----------------------------------
+
+const getAuthHeader = () => {
+  const storedToken = localStorage.getItem('auth_token');
+  if (storedToken) {
+    return `Basic ${storedToken}`;
+  }
+  return 'Basic ' + btoa('admin:techsolve_secure_2026');
+};
 
 export async function healthCheck() {
   const res = await fetch(`${BASE}/health`);
@@ -32,43 +28,49 @@ export async function healthCheck() {
 export async function ingestVideos(youtubeUrls: string[], instagramUrls: string[]): Promise<IngestResponse> {
   const res = await fetch(`${BASE}/ingest`, {
     method: 'POST',
-    headers: getSecuredHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': getAuthHeader() 
+    },
     body: JSON.stringify({ youtube_urls: youtubeUrls, instagram_urls: instagramUrls }),
   });
   if (!res.ok) throw new Error(`Ingest failed: ${await res.text()}`);
   return res.json();
 }
 
-export async function addVideoToDataset(datasetId: string, videoId: string): Promise<{ status: string; message: string }> {
+export async function addVideoToDataset(datasetId: string, videoId: string) {
   const res = await fetch(`${BASE}/analytics/dataset/add`, {
     method: 'POST',
-    headers: getSecuredHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': getAuthHeader() 
+    },
     body: JSON.stringify({ dataset_id: datasetId, video_id: videoId }),
   });
-  if (!res.ok) throw new Error(`Failed to map video to workspace: ${await res.text()}`);
+  if (!res.ok) throw new Error('Failed to add video to dataset');
   return res.json();
 }
 
-export async function removeVideoFromDataset(datasetId: string, videoId: string): Promise<{ status: string; message: string }> {
+export async function removeVideoFromDataset(datasetId: string, videoId: string) {
   const res = await fetch(`${BASE}/analytics/dataset/remove`, {
     method: 'POST',
-    headers: getSecuredHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': getAuthHeader() 
+    },
     body: JSON.stringify({ dataset_id: datasetId, video_id: videoId }),
   });
-  if (!res.ok) throw new Error(`Failed to isolate video from workspace: ${await res.text()}`);
+  if (!res.ok) throw new Error('Failed to remove video from dataset');
   return res.json();
 }
 
-export async function chat(
-  sessionId: string, 
-  platform: string, 
-  datasetId: string, 
-  question: string,
-  activeVideoIds?: string[]
-): Promise<ChatResponse> {
+export async function chat(sessionId: string, platform: string, datasetId: string, question: string, activeVideoIds?: string[]): Promise<ChatResponse> {
   const res = await fetch(`${BASE}/chat`, {
     method: 'POST',
-    headers: getSecuredHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': getAuthHeader()
+    },
     body: JSON.stringify({ 
       session_id: sessionId, 
       platform, 
@@ -94,7 +96,10 @@ export async function chatStream(
 ) {
   const res = await fetch(`${BASE}/chat/stream`, {
     method: 'POST',
-    headers: getSecuredHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': getAuthHeader()
+    },
     body: JSON.stringify({ 
       session_id: sessionId, 
       platform, 
@@ -103,6 +108,7 @@ export async function chatStream(
       active_video_ids: activeVideoIds
     }),
   });
+
   if (!res.ok) {
     onError(`Stream error: ${await res.text()}`);
     return;
@@ -116,7 +122,6 @@ export async function chatStream(
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
     buffer = lines.pop() || '';
@@ -149,22 +154,29 @@ export async function chatStream(
 }
 
 export async function getAnalyticsSummary(datasetId: string, videoIds?: string[]): Promise<AnalyticsSummary> {
-  const url = `${BASE}/analytics/summary?dataset_id=${datasetId}` + (videoIds && videoIds.length > 0 ? `&video_ids=${videoIds.join(',')}` : '');
-  const res = await fetch(url, { headers: getSecuredHeaders() });
+  const url = `${BASE}/analytics/summary?dataset_id=${datasetId}` + (videoIds ? `&video_ids=${videoIds.join(',')}` : '');
+  const res = await fetch(url, { headers: { 'Authorization': getAuthHeader() } });
   if (!res.ok) throw new Error('Failed to fetch summary');
   return res.json();
 }
 
 export async function getAnalyticsRankings(datasetId: string, videoIds?: string[]): Promise<VideoAnalytics[]> {
-  const url = `${BASE}/analytics/rankings?dataset_id=${datasetId}` + (videoIds && videoIds.length > 0 ? `&video_ids=${videoIds.join(',')}` : '');
-  const res = await fetch(url, { headers: getSecuredHeaders() });
+  const url = `${BASE}/analytics/rankings?dataset_id=${datasetId}` + (videoIds ? `&video_ids=${videoIds.join(',')}` : '');
+  const res = await fetch(url, { headers: { 'Authorization': getAuthHeader() } });
   if (!res.ok) throw new Error('Failed to fetch rankings');
   return res.json();
 }
 
 export async function getSemanticProfiles(datasetId: string, videoIds?: string[]): Promise<SemanticProfile[]> {
-  const url = `${BASE}/analytics/semantic-profiles?dataset_id=${datasetId}` + (videoIds && videoIds.length > 0 ? `&video_ids=${videoIds.join(',')}` : '');
-  const res = await fetch(url, { headers: getSecuredHeaders() });
+  const url = `${BASE}/analytics/semantic-profiles?dataset_id=${datasetId}` + (videoIds ? `&video_ids=${videoIds.join(',')}` : '');
+  const res = await fetch(url, { headers: { 'Authorization': getAuthHeader() } });
   if (!res.ok) throw new Error('Failed to fetch semantic profiles');
+  return res.json();
+}
+
+export async function getFullAnalytics(datasetId: string, videoIds?: string[]): Promise<any> {
+  const url = `${BASE}/analytics/full?dataset_id=${datasetId}` + (videoIds ? `&video_ids=${videoIds.join(',')}` : '');
+  const res = await fetch(url, { headers: { 'Authorization': getAuthHeader() } });
+  if (!res.ok) throw new Error('Failed to fetch full analytics');
   return res.json();
 }

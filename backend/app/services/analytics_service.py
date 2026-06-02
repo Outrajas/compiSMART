@@ -1,6 +1,4 @@
-from app.db.sqlite import get_connection
-from qdrant_client import QdrantClient
-from qdrant_client.models import Filter, FieldCondition, MatchValue
+from app.db.sqlite import get_connection, get_dataset_analytics_cache, set_dataset_analytics_cache, get_video_semantic_cache
 import json
 
 def compute_engagement(views, likes, comments):
@@ -10,8 +8,6 @@ def compute_engagement(views, likes, comments):
 
 def get_videos_by_dataset(dataset_id: str, video_ids: list[str] = None) -> list[dict]:
     conn = get_connection()
-    
-    # Query matching active links mapping tables to preserve isolated environments
     if video_ids is not None:
         if not video_ids:
             conn.close()
@@ -44,7 +40,6 @@ def get_videos_by_dataset(dataset_id: str, video_ids: list[str] = None) -> list[
         data["comment_like_ratio"] = round((comments / likes) * 100, 4) if likes else 0
         data["follower_view_ratio"] = round(followers / views, 6) if views else 0
         data["views_per_follower"] = round(views / followers, 2) if followers else None
-
         data["likes_per_1000_views"] = round((likes / views) * 1000, 2) if views else 0.0
         data["comments_per_1000_views"] = round((comments / views) * 1000, 2) if views else 0.0
 
@@ -52,7 +47,6 @@ def get_videos_by_dataset(dataset_id: str, video_ids: list[str] = None) -> list[
             data["engagement_efficiency"] = round(data["engagement_rate"] * data["views_per_follower"], 2)
         else:
             data["engagement_efficiency"] = None
-
         videos.append(data)
 
     if videos:
@@ -184,83 +178,53 @@ def compare_videos_in_dataset(dataset_id: str, video_id_a: str, video_id_b: str)
         "views_per_follower_a": a["views_per_follower"],
         "views_per_follower_b": b["views_per_follower"],
     }
-
     return {"video_a": a, "video_b": b, "differences": diff}
 
-def get_video_semantic_profile(video_id: str, dataset_id: str) -> dict:
-    client = QdrantClient(host="localhost", port=6333)
-    
-    # Isolate context strictly to matching parameters
-    results = client.scroll(
-        collection_name="video_chunks",
-        scroll_filter=Filter(must=[
-            FieldCondition(key="video_id", match=MatchValue(value=video_id)),
-            FieldCondition(key="dataset_id", match=MatchValue(value=dataset_id))
-        ]),
-        limit=1000
-    )
-    chunks = results[0]
-    if not chunks:
-        # Fallback filter matching just the video_id row if dataset links shifted
-        results = client.scroll(
-            collection_name="video_chunks",
-            scroll_filter=Filter(must=[
-                FieldCondition(key="video_id", match=MatchValue(value=video_id))
-            ]),
-            limit=1000
-        )
-        chunks = results[0]
-        if not chunks:
-            return {}
-
-    total = len(chunks)
-    features_list = [c.payload.get("semantic_features", {}) for c in chunks]
-
-    avg = lambda key: round(sum(f.get(key, 0) for f in features_list) / total, 1) if total else 0.0
-    avg_bool = lambda key: round(sum(1 for f in features_list if f.get(key)) / total * 100, 1) if total else 0.0
-
-    opening = [c for c in chunks if c.payload.get("start_time", 0) <= 15]
-    hook = max((c.payload.get("semantic_features", {}).get("hook_score", 0) for c in opening), default=0)
-    if not opening and chunks:
-        hook = max((c.payload.get("semantic_features", {}).get("hook_score", 0) for c in chunks))
-
-    conn = get_connection()
-    row = conn.execute("SELECT duration FROM videos WHERE video_id = ?", (video_id,)).fetchone()
-    conn.close()
-    
-    duration = row["duration"] if row and row["duration"] else 0
-    last_end = max(c.payload.get("end_time", 0) for c in chunks) if chunks else 0
-    coverage = round((last_end / duration) * 100, 1) if duration else 0
-
-    breakdown = {
-        "question": avg_bool("question"),
-        "conflict": avg_bool("conflict"),
-        "emotion": avg("emotion"),
-        "humor": avg("humor_score"),
-        "curiosity": avg("curiosity_score"),
-        "cta": avg("cta_score"),
-    }
-
-    return {
-        "hook_score": round(hook, 1),
-        "avg_humor": avg("humor_score"),
-        "avg_curiosity": avg("curiosity_score"),
-        "avg_emotion": avg("emotion"),
-        "avg_conflict": avg_bool("conflict"),
-        "avg_question": avg_bool("question"),
-        "avg_cta": avg("cta_score"),
-        "transcript_coverage": coverage,
-        "total_segments": total,
-        "hook_breakdown": breakdown,
-    }
+def get_video_semantic_profile(video_id: str) -> dict:
+    # Extremely fast extraction pulling static cache payload generated directly at ingestion
+    cached_profile_json = get_video_semantic_cache(video_id)
+    if cached_profile_json:
+        return json.loads(cached_profile_json)
+    return {}
 
 def get_semantic_profiles_for_dataset(dataset_id: str, video_ids: list[str] = None) -> list[dict]:
     videos = get_videos_by_dataset(dataset_id, video_ids)
     profiles = []
     for v in videos:
-        profile = get_video_semantic_profile(v["video_id"], dataset_id)
+        profile = get_video_semantic_profile(v["video_id"])
         if profile:
             profile["video_id"] = v["video_id"]
             profile["title"] = v.get("title", "")
             profiles.append(profile)
     return profiles
+
+def get_full_analytics_for_dataset(dataset_id: str, video_ids: list[str] = None) -> dict:
+    """Consolidates requests and evaluates Database cache checks directly to optimize repeated view shifts."""
+    vids_str = "-".join(sorted(video_ids)) if video_ids else "ALL"
+    dataset_hash = f"{dataset_id}_{vids_str}"
+
+    cached = get_dataset_analytics_cache(dataset_id, dataset_hash)
+    if cached:
+        return {
+            "summary": json.loads(cached["summary_json"]),
+            "rankings": json.loads(cached["rankings_json"]),
+            "profiles": json.loads(cached["semantic_profiles_json"])
+        }
+            
+    summary = get_platform_summary_for_dataset(dataset_id, video_ids)
+    rankings = get_detailed_rankings_for_dataset(dataset_id, video_ids)
+    profiles = get_semantic_profiles_for_dataset(dataset_id, video_ids)
+    
+    set_dataset_analytics_cache(
+        dataset_id,
+        dataset_hash,
+        json.dumps(summary),
+        json.dumps(rankings),
+        json.dumps(profiles)
+    )
+        
+    return {
+        "summary": summary,
+        "rankings": rankings,
+        "profiles": profiles
+    }

@@ -3,18 +3,26 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from app.core.constants import CHUNK_SIZE, CHUNK_OVERLAP
 from app.core.logger import logger
 
+# Lazy singleton pattern to ensure fast server boots
 _model = None
 
 def get_embedding_model():
     global _model
     if _model is None:
-        logger.info("Loading embedding model BAAI/bge-small-en-v1.5")
+        logger.info("Loading embedding model BAAI/bge-small-en-v1.5 (Lazy Load - First Request)")
         _model = SentenceTransformer("BAAI/bge-small-en-v1.5")
     return _model
 
 def generate_embedding(text: str) -> list[float]:
     model = get_embedding_model()
     return model.encode(text, normalize_embeddings=True).tolist()
+
+def generate_embeddings_batch(texts: list[str]) -> list[list[float]]:
+    """Batch encode an entire list of segment texts in a single parallel pass."""
+    if not texts:
+        return []
+    model = get_embedding_model()
+    return model.encode(texts, normalize_embeddings=True).tolist()
 
 def chunk_transcript(transcript: str) -> list[dict]:
     """

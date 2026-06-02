@@ -1,4 +1,5 @@
 import json
+import hashlib
 import asyncio
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -15,7 +16,7 @@ from app.rag.prompts import build_prompt
 from app.rag.citation_builder import build_citations
 from app.core.config import settings
 from app.core.logger import logger
-from app.db.sqlite import add_chat_message, get_chat_history
+from app.db.sqlite import add_chat_message, get_chat_history, get_answer_cache, set_answer_cache
 from groq import Groq
 
 router = APIRouter(tags=["chat"])
@@ -37,12 +38,23 @@ client = Groq(api_key=settings.groq_api_key)
 def _process_chat(question: str, session_id: str, dataset_id: str, platform: str, active_video_ids: List[str] = None):
     logger.info(f"USER: {question}")
 
-    has_dataset = dataset_has_videos(dataset_id) if dataset_id else False
+    # Generate isolated question hash
+    hash_payload = f"{question}_{'-'.join(sorted(active_video_ids or []))}"
+    q_hash = hashlib.sha256(hash_payload.encode()).hexdigest()
 
+    has_dataset = dataset_has_videos(dataset_id) if dataset_id else False
     plan = plan_intent(question, has_dataset, client)
     needs_retrieval = plan.get("needs_retrieval", has_dataset)
     style = plan.get("style", "analytical")
-    logger.info(f"Intent plan: needs_retrieval={needs_retrieval}, style={style}")
+
+    # Only strictly cache intent requests that do not require shifting contextual discussion states
+    cacheable_intents = {"analytical", "concise", "full_transcript", "transcript_comparison"}
+    
+    if style in cacheable_intents and has_dataset:
+        cached_ans = get_answer_cache(dataset_id, q_hash)
+        if cached_ans:
+            logger.info("CACHE HIT: Retrieved answer from LLM Cache Table.")
+            return cached_ans["answer"], json.loads(cached_ans["sources_json"]), None
 
     context = {}
     if has_dataset:
@@ -54,29 +66,28 @@ def _process_chat(question: str, session_id: str, dataset_id: str, platform: str
         prompt_intent = "transcript_query"
     elif style == "concise":
         prompt_intent = "dataset_simple"
+    elif style == "full_transcript":
+        prompt_intent = "full_transcript"
+    elif style == "transcript_comparison":
+        prompt_intent = "transcript_comparison"
     else:
         prompt_intent = "dataset_deep"
 
     history = get_chat_history(session_id, limit=5)
     prompt = build_prompt(question, context, history, platform, intent=prompt_intent)
 
-    logger.info(
-        f"\n=================== RAG CONTEXT ISOLATION DEBUG ===================\n"
-        f"VIDEOS IN ACTIVE WORKSPACE: {len(context.get('all_metadata', []))}\n"
-        f"CHUNKS IN CONTEXT INJECTOR: {len(context.get('chunks', []))}\n"
-        f"===================================================================\n"
-    )
-
     try:
         response = client.chat.completions.create(
             model=settings.llm_model,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3 if style in ("concise", "verbatim") else 0.7,
+            temperature=0.3 if style in ("concise", "verbatim", "full_transcript") else 0.7,
         )
         answer = response.choices[0].message.content
     except Exception as e:
         logger.error(f"LLM call failed: {e}")
         answer = f"Sorry, I encountered an error tracking processing contexts: {str(e)}"
+
+    sources = build_citations(context) if context.get("all_metadata") else []
 
     follow_up = None
     if style == "analytical" and context.get("all_metadata"):
@@ -92,17 +103,18 @@ def _process_chat(question: str, session_id: str, dataset_id: str, platform: str
         except:
             pass
 
+    # Save to memory and cache
     update_session_state(
         session_id,
         last_intent=plan.get("intent", "unknown"),
         last_topic=question[:100],
         active_videos=[v["video_id"] for v in context.get("all_metadata", [])],
     )
-
     add_chat_message(session_id, "user", question)
     add_chat_message(session_id, "assistant", answer)
 
-    sources = build_citations(context) if context.get("all_metadata") else []
+    if style in cacheable_intents and has_dataset:
+        set_answer_cache(dataset_id, q_hash, answer, json.dumps(sources), settings.llm_model)
 
     return answer, sources, follow_up
 

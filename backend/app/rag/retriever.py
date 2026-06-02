@@ -1,15 +1,11 @@
 from app.services.vector_store_service import VectorStoreService
 from app.db.sqlite import get_connection, get_dataset_video_ids
-from qdrant_client import QdrantClient
-from qdrant_client.models import Filter, FieldCondition, MatchValue
 import json
 
 vector_store = VectorStoreService()
 
 def retrieve_metadata_by_dataset(dataset_id: str, active_video_ids: list[str] = None) -> list[dict]:
     conn = get_connection()
-    
-    # Isolate extraction scope cleanly to current active context list parameters
     if active_video_ids is not None:
         if not active_video_ids:
             conn.close()
@@ -37,48 +33,21 @@ def retrieve_metadata_by_dataset(dataset_id: str, active_video_ids: list[str] = 
         data["engagement_rate"] = round((likes + comments) / views * 100, 4) if views else None
         followers = data.get("follower_count", 0) or 0
         data["views_per_follower"] = round(views / followers, 2) if followers else None
-        
-        # --- CHRONOLOGICAL TRANSCRIPT RECONSTRUCTION (Fallback for old cache) ---
-        transcript = data.get("transcript")
-        if not transcript:
-            try:
-                client = QdrantClient(host="localhost", port=6333)
-                results = client.scroll(
-                    collection_name="video_chunks",
-                    scroll_filter=Filter(must=[
-                        FieldCondition(key="video_id", match=MatchValue(value=data["video_id"]))
-                    ]),
-                    limit=2000
-                )
-                chunks = results[0]
-                if chunks:
-                    # Sort completely chronologically to guarantee correct order
-                    chunks.sort(key=lambda c: c.payload.get("start_time", 0))
-                    data["transcript"] = " ".join(c.payload.get("text", "") for c in chunks)
-                else:
-                    data["transcript"] = ""
-            except Exception as e:
-                print(f"Error reconstructing transcript for {data['video_id']}: {e}")
-                data["transcript"] = ""
-                
         videos.append(data)
     return videos
 
 def retrieve_chunks(
     query: str,
-    dataset_id: str,
     limit: int = 5,
     platform: str | None = None,
     time_max: float | None = None,
     video_ids: list[str] | None = None
 ) -> list[dict]:
-    # Clean cross-platform parameter mapping to prevent Qdrant filter suppressions
     if platform == "cross-platform":
         platform = None
 
     chunks = vector_store.search_with_filter(
         query, limit,
-        dataset_id=dataset_id,
         platform=platform,
         time_max=time_max,
         video_ids=video_ids
@@ -86,7 +55,6 @@ def retrieve_chunks(
     if not chunks:
         chunks = vector_store.search_with_filter(
             query, limit * 2,
-            dataset_id=None,
             platform=platform,
             time_max=time_max,
             video_ids=video_ids
@@ -232,7 +200,7 @@ def retrieve_context(question: str, dataset_id: str, platform: str = "youtube", 
     chunks = []
     if needs_retrieval and active_video_ids:
         keywords = ["quote", "dialogue", "conversation", "emotion", "humor", "hook", "compare"]
-        base_limit = 30 if any(k in question.lower() for k in keywords) else 10
+        base_limit = 10 if any(k in question.lower() for k in keywords) else 5
 
         specific_video_ids = []
         for v in all_metadata:
@@ -245,7 +213,6 @@ def retrieve_context(question: str, dataset_id: str, platform: str = "youtube", 
         for vid in target_videos:
             vid_chunks = retrieve_chunks(
                 question,
-                dataset_id=dataset_id,
                 limit=base_limit,
                 platform=search_platform,
                 time_max=None,

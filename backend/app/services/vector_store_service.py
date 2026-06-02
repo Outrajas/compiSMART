@@ -30,7 +30,6 @@ class VectorStoreService:
         self,
         query: str,
         limit: int = 3,
-        dataset_id: str | None = None,
         video_ids: list[str] | None = None,
         platform: str | None = None,
         time_max: float | None = None
@@ -38,11 +37,6 @@ class VectorStoreService:
         query_vector = generate_embedding(query)
 
         must_conditions = []
-        if dataset_id:
-            must_conditions.append(FieldCondition(
-                key="dataset_id",
-                match=MatchValue(value=dataset_id)
-            ))
         if video_ids:
             must_conditions.append(FieldCondition(
                 key="video_id",
