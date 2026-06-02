@@ -5,22 +5,22 @@ import ChatSidebar from '../components/ChatSidebar';
 import AnalyticsPreview from '../components/AnalyticsPreview';
 import SemanticTimeline from '../components/SemanticTimeline';
 import CrossPlatformComparison from '../components/CrossPlatformComparison';
+import { addVideoToDataset, removeVideoFromDataset } from '../services/api';
 import type { VideoMetadata } from '../types';
 
 export default function Home() {
   const [activeVideos, setActiveVideos] = useState<VideoMetadata[]>([]);
   const [currentDatasetId, setCurrentDatasetId] = useState<string | null>(null);
+  const [selectedVideoIds, setSelectedVideoIds] = useState<string[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatSessionId, setChatSessionId] = useState(`session-${Date.now()}`);
   const particleContainerRef = useRef<HTMLDivElement>(null);
 
-  // Unified Particle System
   useEffect(() => {
     const container = particleContainerRef.current;
     if (!container) return;
     const particles: any[] = [];
     const particleCount = 40;
-    // Mix of YouTube Red and Instagram Purple
     const colors = ['#ef4444', '#a855f7', '#ffffff', '#3b82f6'];
     
     const createParticle = (x: number, y: number, isTrail = false) => {
@@ -79,23 +79,52 @@ export default function Home() {
     };
   }, []);
 
-  const handleIngested = useCallback((vids: VideoMetadata[], datasetId: string) => {
-    setActiveVideos(prev => {
-      const existingIds = new Set(prev.map(v => v.video_id));
-      const uniqueNew = vids.filter(v => !existingIds.has(v.video_id));
-      return [...prev, ...uniqueNew];
-    });
-    setCurrentDatasetId(datasetId);
+  const handleIngested = useCallback(async (vids: VideoMetadata[], datasetId: string) => {
+    if (!currentDatasetId) {
+      // First ingestion initialize session truth completely
+      setCurrentDatasetId(datasetId);
+      setActiveVideos(vids);
+      setSelectedVideoIds(vids.map(v => v.video_id));
+    } else {
+      // Append videos cumulatively on top of the current session persistent memory
+      for (const v of vids) {
+        try {
+          await addVideoToDataset(currentDatasetId, v.video_id);
+        } catch (err) {
+          console.error(`Failed pushing video link mapping into current context session: ${err}`);
+        }
+      }
+      
+      setActiveVideos(prev => {
+        const existingIds = new Set(prev.map(v => v.video_id));
+        const filteredNew = vids.filter(v => !existingIds.has(v.video_id));
+        return [...prev, ...filteredNew];
+      });
+      setSelectedVideoIds(prev => {
+        const uniqueIds = new Set([...prev, ...vids.map(v => v.video_id)]);
+        return Array.from(uniqueIds);
+      });
+    }
     setChatOpen(true);
+  }, [currentDatasetId]);
+
+  const toggleVideoActiveState = useCallback((videoId: string) => {
+    setSelectedVideoIds(prev => 
+      prev.includes(videoId) 
+        ? prev.filter(id => id !== videoId) 
+        : [...prev, videoId]
+    );
   }, []);
 
   const handleWipeMemory = useCallback(() => {
     setChatSessionId(`session-${Date.now()}`);
   }, []);
 
+  const ytCount = activeVideos.filter(v => v.platform.toLowerCase() === 'youtube').length;
+  const igCount = activeVideos.filter(v => v.platform.toLowerCase() === 'instagram').length;
+
   return (
     <div className="relative min-h-screen text-white selection:bg-white/20">
-      {/* Unified Background Matrix */}
       <div className="bg-video-container">
         <div className="absolute inset-0 opacity-100">
            <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/40 via-black to-black"></div>
@@ -128,31 +157,36 @@ export default function Home() {
               </p>
             </div>
 
-            {/* Context Submission Layer */}
             <div className="animate-slide-up" style={{ animationDelay: '200ms' }}>
               <UploadForm onIngested={handleIngested} />
             </div>
 
-            {/* Integrated Multi Platform Audit Board */}
             {currentDatasetId && (
-              <div className="mt-16">
-                <CrossPlatformComparison datasetId={currentDatasetId} />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8 animate-fade-in p-5 bg-white/5 border border-white/10 rounded-2xl font-mono text-xs">
+                <div>Active Dataset Reference: <span className="text-indigo-400 font-bold">{currentDatasetId}</span></div>
+                <div>Loaded Session Space: <span className="text-white font-bold">{activeVideos.length} Videos</span></div>
+                <div>Included Mapping Mix: <span className="text-red-400 font-bold">{ytCount} YouTube</span> | <span className="text-purple-400 font-bold">{igCount} Instagram</span></div>
               </div>
             )}
 
-            {/* Fallback Onboarding State Display */}
+            {currentDatasetId && selectedVideoIds.length > 0 && (
+              <div className="mt-16">
+                <CrossPlatformComparison datasetId={currentDatasetId} activeVideoIds={selectedVideoIds} />
+              </div>
+            )}
+
             {!currentDatasetId && activeVideos.length === 0 && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-12 animate-fade-in" style={{ animationDelay: '400ms' }}>
                 <div className="glass-card p-10 group hover:bg-white/10 border-white/5">
-                  <h3 className="text-2xl font-bold mb-4">True Cross-Platform Context</h3>
+                  <h3 className="text-2xl font-bold mb-4">Persistent Session Sandbox</h3>
                   <p className="text-white/50 leading-relaxed">
-                    Paste YouTube links and Instagram Reels into the same batch. The system automatically normalizes the metrics, letting you pit long-form content directly against short-form virality.
+                    Paste content arrays together. Subsequent lookups layer extra metrics on top of your existing workbench context stack instead of spawning disconnected state models.
                   </p>
                 </div>
                 <div className="glass-card p-10 group hover:bg-white/10 border-white/5">
                   <h3 className="text-2xl font-bold mb-4">Target Matrix Metrics</h3>
                   <div className="space-y-3 mt-4">
-                    {["Compare YouTube vs Instagram Engagement", "Benchmark Transcript Hook Scores", "Audit Multi-Platform Retention"].map(tip => (
+                    {["Layer analysis parameters inside one runtime window", "Audit mixed platform interaction densities on-the-fly", "Isolate context segments dynamically"].map(tip => (
                       <div key={tip} className="px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white/60 italic">
                         "{tip}"
                       </div>
@@ -162,27 +196,29 @@ export default function Home() {
               </div>
             )}
 
-            {/* Context Processing Dashboard Views */}
-            {currentDatasetId && (
+            {currentDatasetId && selectedVideoIds.length > 0 && (
               <div className="space-y-12 py-12 animate-slide-up">
-                <AnalyticsPreview platform="youtube" datasetId={currentDatasetId} />
-                <SemanticTimeline datasetId={currentDatasetId} />
+                <AnalyticsPreview platform="youtube" datasetId={currentDatasetId} activeVideoIds={selectedVideoIds} />
+                <SemanticTimeline datasetId={currentDatasetId} activeVideoIds={selectedVideoIds} />
               </div>
             )}
 
-            {/* Current Active Library Cards Grid */}
             {activeVideos.length > 0 && (
               <div className="py-12 animate-fade-in">
                 <div className="flex justify-between items-end mb-8">
                   <div>
-                    <h2 className="text-4xl font-black tracking-tight">Active Dataset Library</h2>
-                    <p className="text-white/40 mt-2">Currently analyzing {activeVideos.length} mixed media assets.</p>
+                    <h2 className="text-4xl font-black tracking-tight">Loaded Workbench Core</h2>
+                    <p className="text-white/40 mt-2">Manage session variables across {activeVideos.length} current assets.</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                   {activeVideos.map((v, index) => (
                     <div key={`${v.platform}-${v.video_id}-${index}`} className="animate-slide-up" style={{ animationDelay: `${index * 100}ms` }}>
-                      <VideoCard data={v} />
+                      <VideoCard 
+                        data={v} 
+                        isActive={selectedVideoIds.includes(v.video_id)}
+                        onToggleActive={() => toggleVideoActiveState(v.video_id)}
+                      />
                     </div>
                   ))}
                 </div>
@@ -195,7 +231,6 @@ export default function Home() {
           </footer>
         </div>
 
-        {/* Floating Analyzer Conversation Controller */}
         {!chatOpen && (
           <button
             onClick={() => setChatOpen(true)}
@@ -215,6 +250,7 @@ export default function Home() {
           isOpen={chatOpen}
           onClose={() => setChatOpen(false)}
           onWipeMemory={handleWipeMemory}
+          activeVideoIds={selectedVideoIds}
         />
       </div>
     </div>

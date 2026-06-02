@@ -1,18 +1,22 @@
-// frontend/src/components/SemanticTimeline.tsx
 import { useEffect, useState } from 'react';
 import { getSemanticProfiles } from '../services/api';
 import type { SemanticProfile } from '../types';
 
 interface Props {
   datasetId: string;
+  activeVideoIds: string[];
 }
 
-export default function SemanticTimeline({ datasetId }: Props) {
+export default function SemanticTimeline({ datasetId, activeVideoIds }: Props) {
   const [profiles, setProfiles] = useState<SemanticProfile[]>([]);
 
   useEffect(() => {
-    getSemanticProfiles(datasetId).then(setProfiles);
-  }, [datasetId]);
+    if (!datasetId || activeVideoIds.length === 0) {
+      setProfiles([]);
+      return;
+    }
+    getSemanticProfiles(datasetId, activeVideoIds).then(setProfiles);
+  }, [datasetId, activeVideoIds]);
 
   if (profiles.length === 0) return null;
 

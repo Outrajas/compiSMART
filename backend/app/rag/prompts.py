@@ -12,8 +12,12 @@ def _video_summary(v: dict) -> str:
     hashtags = v.get("hashtags", [])
     hook_text = v.get("hook_text")
     platform = str(v.get("platform", "unknown")).upper()
+    
+    q_count = v.get("question_count", 0)
+    e_words = v.get("emotion_words", 0)
+    c_score = v.get("conflict_score", 0)
+    h_score = v.get("humor_score", 0)
 
-    # Prepend explicit platform tags so the LLM identifies cross-platform scope instantly
     lines = [f'[{platform}] "{title}"']
     if creator:
         lines.append(f"by {creator}")
@@ -31,12 +35,14 @@ def _video_summary(v: dict) -> str:
         lines.append(f"Views/Follower: {vpf:.1f}x")
     if duration:
         lines.append(f"Duration: {duration}s")
-    if upload:
-        lines.append(f"Upload: {upload}")
     if hashtags:
         lines.append(f"Tags: {', '.join(hashtags[:5])}")
+    
+    # FIX: Explicitly enforce the LLM's understanding of chronological placement
     if hook_text:
-        lines.append(f"Hook Segment Text: {hook_text[:300]}")
+        lines.append(f"First 15s Hook Transcript (Intro Text): {hook_text[:300]}")
+        
+    lines.append(f"Global Transcript Stats: {q_count} questions, {e_words} emotion markers, {c_score} conflict markers, {h_score} humor markers")
     return " | ".join(lines)
 
 def _data_completeness(videos: list[dict]) -> str:
@@ -116,6 +122,51 @@ def _winners_block(analytics_summary: dict, semantic_profiles: list[dict]) -> st
             winners.append(f"Hook Score Winner: **{sorted_hooks[0]['title']}** ({sorted_hooks[0]['hook_score']}/10)")
     return "\n".join(winners)
 
+def _full_transcript_context(all_metadata: list[dict]) -> str:
+    lines = ["## Full Transcripts (Chronological)"]
+    for v in all_metadata:
+        title = v.get("title", v.get("video_id", "Unknown"))
+        platform = str(v.get("platform", "unknown")).upper()
+        transcript = v.get("transcript", "")
+        if not transcript:
+            transcript = "[No transcript available for this video]"
+        lines.append(f"### [{platform}] {title}\n{transcript}\n")
+    return "\n".join(lines)
+
+def _build_full_transcript_prompt(question: str, context: dict, history: str = "") -> str:
+    all_metadata = context.get("all_metadata", [])
+    transcripts_block = _full_transcript_context(all_metadata)
+    history_block = f"## Conversation History Context\n{history}\n" if history else ""
+    
+    return f"""You are a transcript retrieval engine. The user has requested the full or complete transcript for the video(s).
+
+{history_block}
+{transcripts_block}
+
+User question: {question}
+
+Respond by providing the full transcript text exactly as requested, grouped clearly by video. Do not summarize, truncate, or use semantic RAG chunks. Do not hallucinate content. Provide the chronological text."""
+
+def _build_transcript_comparison_prompt(question: str, context: dict, history: str = "", platform: str = "mixed") -> str:
+    all_metadata = context.get("all_metadata", [])
+    transcripts_block = _full_transcript_context(all_metadata)
+    summaries = "\n".join([_video_summary(v) for v in all_metadata]) if all_metadata else "No videos."
+    history_block = f"## Conversation History Context\n{history}\n" if history else ""
+    
+    return f"""You are a rigorous creator-growth analyst specialized in cross-platform media. The user wants to compare the full transcripts of the videos.
+
+{history_block}
+
+## Full Transcripts for Comparison
+{transcripts_block}
+
+## Metadata Context & Global Transcript Statistics
+{summaries}
+
+User question: {question}
+
+Compare the transcripts directly. Analyze length, dialogue density, emotional language, questions, conflict, humor, and storytelling based ONLY on the full text provided above. Provide concrete verbatim examples from the text to back up your points."""
+
 def _build_minimal_fact_prompt(question: str, context: dict, history: str = "") -> str:
     all_metadata = context.get("all_metadata", [])
     if not all_metadata:
@@ -194,7 +245,7 @@ def _build_deep_analytical_prompt(question: str, context: dict, history: str = "
 
     completeness = _data_completeness(all_metadata)
     summaries = "\n".join([_video_summary(v) for v in all_metadata]) if all_metadata else "No videos."
-    chunks_block = _chunk_context(chunks) if chunks else "## No platform transcript chunks available. Evaluating via metadata store metrics."
+    chunks_block = _chunk_context(chunks) if chunks else "## No semantic vector chunks were queried for this specific task. Evaluate using Metadata and Global Transcript Stats."
     coverage_block = _coverage_text(semantic_profiles)
     winners = _winners_block(analytics_summary, semantic_profiles)
 
@@ -207,8 +258,9 @@ def _build_deep_analytical_prompt(question: str, context: dict, history: str = "
 2. **Platform Performance Auditing Rules**: 
    - YouTube calculates Engagement Rate relative to Views.
    - Instagram calculations evaluate Engagement using absolute interaction volume weights because View counts are subject to profile access layers. Acknowledge this platform metric schema change explicitly if comparing performance.
-3. **Evidence Extraction Protection**: Every assertion must link back to specific platform data tokens or Hook Segment Texts. Never claim evidence is missing unless all retrieved blocks for that platform are blank.
+3. **Evidence Extraction Protection**: An Instagram caption or Hook Segment Text IS valid transcript evidence. Furthermore, Global Transcript Stats provide the exact density of emotional/conflict/humor terms across the full video. Never claim transcript evidence is missing if Hook Segment Text or Global Transcript Stats are provided.
 4. **Confidence Node**: Finalize every evaluation section with an explicit analytical certainty score (High/Medium/Low).
+5. **Hook Analysis Priority**: To analyze hooks, intros, or the beginning of a video, you MUST rely exclusively on the 'First 15s Hook Transcript (Intro Text)' field provided in the Asset Metrics List. Do NOT try to piece together the start of the video using random semantic vector chunks.
 """
 
     prompt = f"""{system}
@@ -243,5 +295,9 @@ def build_prompt(question: str, context: dict, history: str = "", platform: str 
         return _build_comparison_prompt(question, context, history)
     elif intent == "transcript_query":
         return _build_transcript_query_prompt(question, context, history)
+    elif intent == "full_transcript":
+        return _build_full_transcript_prompt(question, context, history)
+    elif intent == "transcript_comparison":
+        return _build_transcript_comparison_prompt(question, context, history, platform)
     else:
         return _build_deep_analytical_prompt(question, context, history, platform)

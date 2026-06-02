@@ -1,25 +1,31 @@
 import { useEffect, useState } from 'react';
 import { getAnalyticsRankings, getAnalyticsSummary } from '../services/api';
 import type { VideoAnalytics, AnalyticsSummary } from '../types';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface Props {
   platform: 'youtube' | 'instagram';
   datasetId: string;
+  activeVideoIds: string[];
 }
 
-export default function AnalyticsPreview({ platform, datasetId }: Props) {
+export default function AnalyticsPreview({ platform, datasetId, activeVideoIds }: Props) {
   const [rankings, setRankings] = useState<VideoAnalytics[]>([]);
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function loadAnalytics() {
-      if (!datasetId) return;
+      if (!datasetId || activeVideoIds.length === 0) {
+        setRankings([]);
+        setSummary(null);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
-        const rData = await getAnalyticsRankings(datasetId);
-        const sData = await getAnalyticsSummary(datasetId);
+        const rData = await getAnalyticsRankings(datasetId, activeVideoIds);
+        const sData = await getAnalyticsSummary(datasetId, activeVideoIds);
         setRankings(rData);
         setSummary(sData);
       } catch (err) {
@@ -29,18 +35,16 @@ export default function AnalyticsPreview({ platform, datasetId }: Props) {
       }
     }
     loadAnalytics();
-  }, [datasetId, platform]);
+  }, [datasetId, platform, activeVideoIds]);
 
   if (loading) return <div className="py-12 text-center text-white/40 font-mono animate-pulse">Computing audit visualizations...</div>;
   if (rankings.length === 0) return null;
 
-  // Filter out invalid zero metrics for cleaner graph visualization layout rules
   const hasFollowerData = rankings.some(r => r.follower_count && r.follower_count > 0);
   const themeColor = platform === 'youtube' ? '#dc2626' : '#c084fc';
 
   return (
     <div className="space-y-8 animate-fade-in">
-      {/* Dynamic Summary Cards Snapshot Header Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="glass-card p-6 bg-white/5 border border-white/10 rounded-2xl">
           <span className="text-xs text-white/40 uppercase tracking-widest font-mono">Analyzed Content</span>
@@ -66,9 +70,7 @@ export default function AnalyticsPreview({ platform, datasetId }: Props) {
         </div>
       </div>
 
-      {/* Primary Analytical Graph Visual Blocks */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Chart A: Engagement Rate */}
         <div className="glass-card p-6 bg-white/5 border border-white/10 rounded-2xl">
           <h4 className="text-sm font-bold uppercase tracking-wider text-white/70 mb-4">Engagement Rate Audit (%)</h4>
           <ResponsiveContainer width="100%" height={220}>
@@ -82,7 +84,6 @@ export default function AnalyticsPreview({ platform, datasetId }: Props) {
           </ResponsiveContainer>
         </div>
 
-        {/* Chart B: Dynamic Efficiency or Views per Follower tracking toggle */}
         <div className="glass-card p-6 bg-white/5 border border-white/10 rounded-2xl">
           <h4 className="text-sm font-bold uppercase tracking-wider text-white/70 mb-4">
             {hasFollowerData ? "Views Per Follower Multiplier" : "Absolute Verified Reach (Views)"}

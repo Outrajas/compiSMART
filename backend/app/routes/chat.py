@@ -16,7 +16,6 @@ from app.rag.citation_builder import build_citations
 from app.core.config import settings
 from app.core.logger import logger
 from app.db.sqlite import add_chat_message, get_chat_history
-from app.models.chat import ChatRequest
 from groq import Groq
 
 router = APIRouter(tags=["chat"])
@@ -26,57 +25,48 @@ class ChatResponse(BaseModel):
     sources: List[str]
     follow_up: Optional[str] = None
 
+class IsolatedChatRequest(BaseModel):
+    session_id: str
+    platform: str
+    dataset_id: str
+    question: str
+    active_video_ids: Optional[List[str]] = None
+
 client = Groq(api_key=settings.groq_api_key)
 
-def _process_chat(question: str, session_id: str, dataset_id: str, platform: str):
+def _process_chat(question: str, session_id: str, dataset_id: str, platform: str, active_video_ids: List[str] = None):
     logger.info(f"USER: {question}")
 
-    # 1. Check dataset existence
     has_dataset = dataset_has_videos(dataset_id) if dataset_id else False
 
-    # 2. Intent planning (LLM decides needs_retrieval and style)
     plan = plan_intent(question, has_dataset, client)
-    needs_retrieval = plan.get("needs_retrieval", has_dataset)  # default to retrieval if dataset exists
+    needs_retrieval = plan.get("needs_retrieval", has_dataset)
     style = plan.get("style", "analytical")
     logger.info(f"Intent plan: needs_retrieval={needs_retrieval}, style={style}")
 
-    # 3. Always fetch metadata (if dataset exists) for context; fetch chunks only if needed
     context = {}
     if has_dataset:
-        # Metadata is always useful for analytics
-        context = retrieve_context(question, dataset_id, platform, needs_retrieval=needs_retrieval)
+        context = retrieve_context(question, dataset_id, platform, needs_retrieval=needs_retrieval, active_video_ids=active_video_ids)
     else:
-        # No dataset: empty context
         context = {"all_metadata": [], "chunks": [], "analytics_summary": {}, "hook_summary": "", "semantic_profiles": []}
 
-    # 4. Map style to prompt intent string
     if style == "verbatim":
         prompt_intent = "transcript_query"
     elif style == "concise":
         prompt_intent = "dataset_simple"
-    elif style == "analytical":
-        prompt_intent = "dataset_deep"
     else:
-        prompt_intent = "dataset_deep"  # fallback
+        prompt_intent = "dataset_deep"
 
-    # 5. Build prompt
     history = get_chat_history(session_id, limit=5)
     prompt = build_prompt(question, context, history, platform, intent=prompt_intent)
 
-    # 6. Structured Context Debug Logging
     logger.info(
-        f"\n=================== RAG CONTEXT DEBUG ===================\n"
-        f"VIDEOS: {len(context.get('all_metadata', []))}\n"
-        f"ANALYTICS: {1 if context.get('analytics_summary') else 0}\n"
-        f"CHUNKS: {len(context.get('chunks', []))}\n"
-        f"=========================================================\n"
+        f"\n=================== RAG CONTEXT ISOLATION DEBUG ===================\n"
+        f"VIDEOS IN ACTIVE WORKSPACE: {len(context.get('all_metadata', []))}\n"
+        f"CHUNKS IN CONTEXT INJECTOR: {len(context.get('chunks', []))}\n"
+        f"===================================================================\n"
     )
-    for c in context.get("chunks", [])[:10]:
-        logger.info(f"CHUNK ({c.get('video_id', 'unknown')}): {c.get('text', '')[:100]}")
 
-    logger.info(f"Prompt length: {len(prompt)} chars, ~{len(prompt)//4} tokens")
-
-    # 7. Call LLM
     try:
         response = client.chat.completions.create(
             model=settings.llm_model,
@@ -86,9 +76,8 @@ def _process_chat(question: str, session_id: str, dataset_id: str, platform: str
         answer = response.choices[0].message.content
     except Exception as e:
         logger.error(f"LLM call failed: {e}")
-        answer = f"Sorry, I encountered an error: {str(e)}"
+        answer = f"Sorry, I encountered an error tracking processing contexts: {str(e)}"
 
-    # 8. Follow‑up suggestion (optional, for analytical queries)
     follow_up = None
     if style == "analytical" and context.get("all_metadata"):
         try:
@@ -103,7 +92,6 @@ def _process_chat(question: str, session_id: str, dataset_id: str, platform: str
         except:
             pass
 
-    # 9. Update session memory
     update_session_state(
         session_id,
         last_intent=plan.get("intent", "unknown"),
@@ -111,20 +99,18 @@ def _process_chat(question: str, session_id: str, dataset_id: str, platform: str
         active_videos=[v["video_id"] for v in context.get("all_metadata", [])],
     )
 
-    # 10. Save to chat history
     add_chat_message(session_id, "user", question)
     add_chat_message(session_id, "assistant", answer)
 
-    # 11. Build sources (only if metadata exists)
     sources = build_citations(context) if context.get("all_metadata") else []
 
     return answer, sources, follow_up
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(request: IsolatedChatRequest):
     try:
         answer, sources, follow_up = _process_chat(
-            request.question, request.session_id, request.dataset_id, request.platform
+            request.question, request.session_id, request.dataset_id, request.platform, request.active_video_ids
         )
         return ChatResponse(answer=answer, sources=sources, follow_up=follow_up)
     except Exception as e:
@@ -132,9 +118,9 @@ async def chat_endpoint(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/chat/stream")
-async def chat_stream_endpoint(request: ChatRequest):
+async def chat_stream_endpoint(request: IsolatedChatRequest):
     answer, sources, follow_up = _process_chat(
-        request.question, request.session_id, request.dataset_id, request.platform
+        request.question, request.session_id, request.dataset_id, request.platform, request.active_video_ids
     )
     async def gen():
         for word in answer.split():

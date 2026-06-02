@@ -2,27 +2,37 @@ import type { VideoMetadata } from '../types';
 
 interface Props {
   data: VideoMetadata;
+  isActive: boolean;
+  onToggleActive: () => void;
 }
 
-export default function VideoCard({ data }: Props) {
+export default function VideoCard({ data, isActive, onToggleActive }: Props) {
   const isYoutube = data.platform.toLowerCase() === 'youtube';
-  
-  // Clean fallback handling for missing views or engagement calculations
   const views = data.views || 0;
   const engagement = data.engagement_rate || 0;
 
   return (
-    <div className="glass-card overflow-hidden group hover:border-white/20 transition-all duration-500 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6 flex flex-col justify-between h-full space-y-6">
+    <div className={`glass-card overflow-hidden group hover:border-white/20 transition-all duration-500 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6 flex flex-col justify-between h-full space-y-6 ${
+      !isActive ? 'opacity-40 saturate-50 scale-[0.98] border-dashed border-white/5' : ''
+    }`}>
       <div>
-        <div className="flex justify-between items-start gap-4 mb-4">
+        <div className="flex justify-between items-center gap-4 mb-4">
           <span className={`px-3 py-1 rounded-full text-xs font-mono font-bold tracking-wider uppercase ${
             isYoutube ? 'bg-red-500/20 text-red-400' : 'bg-purple-500/20 text-purple-400'
           }`}>
             {data.platform}
           </span>
-          <span className="text-xs text-white/40 font-mono">
-            ID: {data.video_id}
-          </span>
+          <button 
+            type="button"
+            onClick={onToggleActive}
+            className={`text-xs px-2.5 py-1 rounded-lg font-bold font-mono transition-all duration-300 ${
+              isActive 
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-rose-500/20 hover:text-rose-400 hover:border-rose-500/30' 
+                : 'bg-white/10 text-white/40 border border-white/10 hover:bg-emerald-500/20 hover:text-emerald-400'
+            }`}
+          >
+            {isActive ? "✓ CONTEXT ACTIVE" : "✕ EXCLUDED"}
+          </button>
         </div>
 
         <h4 className="text-lg font-bold text-white group-hover:text-glow transition duration-300 line-clamp-2 mb-2" title={data.title}>

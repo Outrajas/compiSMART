@@ -5,21 +5,24 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 
 interface Props {
   datasetId: string;
+  activeVideoIds: string[];
 }
 
-export default function CrossPlatformComparison({ datasetId }: Props) {
+export default function CrossPlatformComparison({ datasetId, activeVideoIds }: Props) {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     async function loadCrossPlatformData() {
-      if (!datasetId) return;
+      if (!datasetId || activeVideoIds.length === 0) {
+        setData([]);
+        return;
+      }
       setLoading(true);
       try {
-        const rankings = await getAnalyticsRankings(datasetId);
-        const profiles = await getSemanticProfiles(datasetId);
+        const rankings = await getAnalyticsRankings(datasetId, activeVideoIds);
+        const profiles = await getSemanticProfiles(datasetId, activeVideoIds);
 
-        // Map combined data items sorted by metrics
         const formatted = rankings.map((item: VideoAnalytics) => {
           const profileMatch = profiles.find(p => p.video_id === item.video_id);
           return {
@@ -42,7 +45,7 @@ export default function CrossPlatformComparison({ datasetId }: Props) {
     }
 
     loadCrossPlatformData();
-  }, [datasetId]);
+  }, [datasetId, activeVideoIds]);
 
   if (data.length === 0) return null;
 
@@ -64,9 +67,7 @@ export default function CrossPlatformComparison({ datasetId }: Props) {
         <div className="py-12 text-center text-white/40 font-mono animate-pulse">Recalibrating dataset metrics...</div>
       ) : (
         <div className="space-y-8">
-          {/* Charts Layout Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Engagement Chart */}
             <div className="bg-white/5 border border-white/5 rounded-2xl p-4">
               <h4 className="text-sm font-bold uppercase tracking-wider text-white/70 mb-4">Engagement Rate Comparison</h4>
               <ResponsiveContainer width="100%" height={260}>
@@ -74,9 +75,7 @@ export default function CrossPlatformComparison({ datasetId }: Props) {
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
                   <XAxis dataKey="title" tick={{ fill: 'rgba(255,255,255,0.6)', fontSize: 10 }} tickFormatter={(val) => val.substring(0, 15) + '...'} />
                   <YAxis unit="%" tick={{ fill: 'rgba(255,255,255,0.6)' }} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#111', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.2)', color: '#fff' }}
-                  />
+                  <Tooltip contentStyle={{ backgroundColor: '#111', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.2)', color: '#fff' }} />
                   <Bar dataKey="engagement" radius={[4, 4, 0, 0]} name="Engagement Rate %">
                     {data.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.platform === 'YOUTUBE' ? '#ef4444' : '#a855f7'} />
@@ -86,7 +85,6 @@ export default function CrossPlatformComparison({ datasetId }: Props) {
               </ResponsiveContainer>
             </div>
 
-            {/* Hook Chart */}
             <div className="bg-white/5 border border-white/5 rounded-2xl p-4">
               <h4 className="text-sm font-bold uppercase tracking-wider text-white/70 mb-4">Transcript Hook Strength (0-10)</h4>
               <ResponsiveContainer width="100%" height={260}>
@@ -94,9 +92,7 @@ export default function CrossPlatformComparison({ datasetId }: Props) {
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
                   <XAxis dataKey="title" tick={{ fill: 'rgba(255,255,255,0.6)', fontSize: 10 }} tickFormatter={(val) => val.substring(0, 15) + '...'} />
                   <YAxis domain={[0, 10]} tick={{ fill: 'rgba(255,255,255,0.6)' }} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#111', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.2)', color: '#fff' }}
-                  />
+                  <Tooltip contentStyle={{ backgroundColor: '#111', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.2)', color: '#fff' }} />
                   <Bar dataKey="hookScore" radius={[4, 4, 0, 0]} name="Hook Score">
                      {data.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.platform === 'YOUTUBE' ? '#fca5a5' : '#d8b4fe'} />
@@ -107,7 +103,6 @@ export default function CrossPlatformComparison({ datasetId }: Props) {
             </div>
           </div>
 
-          {/* Detailed Performance Ingestion Ledger */}
           <div className="overflow-x-auto border border-white/10 rounded-2xl">
             <table className="w-full text-left text-sm whitespace-nowrap">
               <thead className="bg-white/10 text-xs uppercase tracking-wider text-white/60 border-b border-white/10">

@@ -1,4 +1,3 @@
-// frontend/src/components/ChatSidebar.tsx
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useStreaming } from '../hooks/useStreaming';
 import ReactMarkdown from 'react-markdown';
@@ -11,9 +10,10 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   onWipeMemory: () => void;
+  activeVideoIds?: string[];
 }
 
-export default function ChatSidebar({ sessionId, platform, datasetId, isOpen, onClose, onWipeMemory }: Props) {
+export default function ChatSidebar({ sessionId, platform, datasetId, isOpen, onClose, onWipeMemory, activeVideoIds = [] }: Props) {
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
   const [input, setInput] = useState('');
   const [previousDataset, setPreviousDataset] = useState<string | null>(null);
@@ -50,8 +50,8 @@ export default function ChatSidebar({ sessionId, platform, datasetId, isOpen, on
     const userMsg = input.trim();
     setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
     setInput('');
-    sendMessage(userMsg);
-  }, [input, datasetId, sendMessage]);
+    sendMessage(userMsg, activeVideoIds);
+  }, [input, datasetId, sendMessage, activeVideoIds]);
 
   const handleClearMemory = useCallback(() => {
     setMessages([]);
@@ -71,9 +71,16 @@ export default function ChatSidebar({ sessionId, platform, datasetId, isOpen, on
   return (
     <div className="w-96 border-l border-white/20 bg-black/40 backdrop-blur-xl flex flex-col h-full shadow-2xl fixed right-0 top-0 z-40 animate-slide-up">
       <div className="p-5 border-b border-white/20 flex justify-between items-center bg-gradient-to-r from-white/10 to-transparent">
-        <h2 className="font-bold text-xl text-white flex items-center gap-2">
-          🤖 AI Assistant
-        </h2>
+        <div>
+          <h2 className="font-bold text-xl text-white flex items-center gap-2">
+            🤖 AI Assistant
+          </h2>
+          {datasetId && (
+            <span className="text-[10px] font-mono text-emerald-400 block mt-1 uppercase tracking-widest">
+              ● Memory Bounds Active ({activeVideoIds.length} Nodes)
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           <button
             onClick={handleClearMemory}
@@ -90,7 +97,7 @@ export default function ChatSidebar({ sessionId, platform, datasetId, isOpen, on
 
       {showContextUpdate && (
         <div className="bg-emerald-500/20 border-l-4 border-emerald-400 p-3 text-sm text-emerald-100 animate-pulse-glow backdrop-blur-sm">
-          ✅ New analysis detected. Context updated.
+          ✅ New analysis detected. Context layered on top of current session memory.
         </div>
       )}
 

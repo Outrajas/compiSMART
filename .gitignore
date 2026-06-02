@@ -42,7 +42,7 @@ qdrant_storage/
 
 # Whisper Models
 
-models/
+
 cache/
 hf_cache/
 

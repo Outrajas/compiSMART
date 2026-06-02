@@ -1,4 +1,3 @@
-// frontend/src/services/api.ts (unchanged)
 import type { IngestResponse, ChatResponse, AnalyticsSummary, VideoAnalytics , SemanticProfile} from '../types';
 
 const BASE = 'http://127.0.0.1:8000';
@@ -18,11 +17,43 @@ export async function ingestVideos(youtubeUrls: string[], instagramUrls: string[
   return res.json();
 }
 
-export async function chat(sessionId: string, platform: string, datasetId: string, question: string): Promise<ChatResponse> {
+export async function addVideoToDataset(datasetId: string, videoId: string): Promise<{ status: string; message: string }> {
+  const res = await fetch(`${BASE}/analytics/dataset/add`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataset_id: datasetId, video_id: videoId }),
+  });
+  if (!res.ok) throw new Error(`Failed to map video to workspace: ${await res.text()}`);
+  return res.json();
+}
+
+export async function removeVideoFromDataset(datasetId: string, videoId: string): Promise<{ status: string; message: string }> {
+  const res = await fetch(`${BASE}/analytics/dataset/remove`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataset_id: datasetId, video_id: videoId }),
+  });
+  if (!res.ok) throw new Error(`Failed to isolate video from workspace: ${await res.text()}`);
+  return res.json();
+}
+
+export async function chat(
+  sessionId: string, 
+  platform: string, 
+  datasetId: string, 
+  question: string,
+  activeVideoIds?: string[]
+): Promise<ChatResponse> {
   const res = await fetch(`${BASE}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session_id: sessionId, platform, dataset_id: datasetId, question }),
+    body: JSON.stringify({ 
+      session_id: sessionId, 
+      platform, 
+      dataset_id: datasetId, 
+      question,
+      active_video_ids: activeVideoIds 
+    }),
   });
   if (!res.ok) throw new Error(`Chat failed: ${await res.text()}`);
   return res.json();
@@ -36,12 +67,19 @@ export async function chatStream(
   onToken: (token: string) => void,
   onSources: (sources: string[]) => void,
   onDone: () => void,
-  onError: (err: string) => void
+  onError: (err: string) => void,
+  activeVideoIds?: string[]
 ) {
   const res = await fetch(`${BASE}/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session_id: sessionId, platform, dataset_id: datasetId, question }),
+    body: JSON.stringify({ 
+      session_id: sessionId, 
+      platform, 
+      dataset_id: datasetId, 
+      question,
+      active_video_ids: activeVideoIds
+    }),
   });
   if (!res.ok) {
     onError(`Stream error: ${await res.text()}`);
@@ -88,20 +126,23 @@ export async function chatStream(
   }
 }
 
-export async function getAnalyticsSummary(datasetId: string): Promise<AnalyticsSummary> {
-  const res = await fetch(`${BASE}/analytics/summary?dataset_id=${datasetId}`);
+export async function getAnalyticsSummary(datasetId: string, videoIds?: string[]): Promise<AnalyticsSummary> {
+  const url = `${BASE}/analytics/summary?dataset_id=${datasetId}` + (videoIds && videoIds.length > 0 ? `&video_ids=${videoIds.join(',')}` : '');
+  const res = await fetch(url);
   if (!res.ok) throw new Error('Failed to fetch summary');
   return res.json();
 }
 
-export async function getAnalyticsRankings(datasetId: string): Promise<VideoAnalytics[]> {
-  const res = await fetch(`${BASE}/analytics/rankings?dataset_id=${datasetId}`);
+export async function getAnalyticsRankings(datasetId: string, videoIds?: string[]): Promise<VideoAnalytics[]> {
+  const url = `${BASE}/analytics/rankings?dataset_id=${datasetId}` + (videoIds && videoIds.length > 0 ? `&video_ids=${videoIds.join(',')}` : '');
+  const res = await fetch(url);
   if (!res.ok) throw new Error('Failed to fetch rankings');
   return res.json();
 }
 
-export async function getSemanticProfiles(datasetId: string): Promise<SemanticProfile[]> {
-  const res = await fetch(`${BASE}/analytics/semantic-profiles?dataset_id=${datasetId}`);
+export async function getSemanticProfiles(datasetId: string, videoIds?: string[]): Promise<SemanticProfile[]> {
+  const url = `${BASE}/analytics/semantic-profiles?dataset_id=${datasetId}` + (videoIds && videoIds.length > 0 ? `&video_ids=${videoIds.join(',')}` : '');
+  const res = await fetch(url);
   if (!res.ok) throw new Error('Failed to fetch semantic profiles');
   return res.json();
 }

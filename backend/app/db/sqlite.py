@@ -40,6 +40,10 @@ def init_db():
             views_per_follower REAL DEFAULT 0,
             hook_score REAL DEFAULT 0,
             transcript_coverage REAL DEFAULT 0,
+            question_count INTEGER DEFAULT 0,
+            emotion_words INTEGER DEFAULT 0,
+            conflict_score INTEGER DEFAULT 0,
+            humor_score INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -55,7 +59,11 @@ def init_db():
         "hook_text": "ALTER TABLE videos ADD COLUMN hook_text TEXT",
         "following_count": "ALTER TABLE videos ADD COLUMN following_count INTEGER DEFAULT 0",
         "posts_count": "ALTER TABLE videos ADD COLUMN posts_count INTEGER DEFAULT 0",
-        "bio": "ALTER TABLE videos ADD COLUMN bio TEXT"
+        "bio": "ALTER TABLE videos ADD COLUMN bio TEXT",
+        "question_count": "ALTER TABLE videos ADD COLUMN question_count INTEGER DEFAULT 0",
+        "emotion_words": "ALTER TABLE videos ADD COLUMN emotion_words INTEGER DEFAULT 0",
+        "conflict_score": "ALTER TABLE videos ADD COLUMN conflict_score INTEGER DEFAULT 0",
+        "humor_score": "ALTER TABLE videos ADD COLUMN humor_score INTEGER DEFAULT 0"
     }
 
     for col, query in migrations.items():
@@ -69,7 +77,7 @@ def init_db():
                 logger.error(f"Migration failed for column {col}: {e}")
 
     # =========================
-    # Datasets
+    # Datasets (Isolation Layer)
     # =========================
     conn.execute("""
         CREATE TABLE IF NOT EXISTS datasets (
@@ -120,6 +128,42 @@ def init_db():
     conn.close()
 
     logger.info("Database initialized successfully")
+
+
+def add_video_to_dataset(dataset_id: str, video_id: str):
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO dataset_videos (dataset_id, video_id)
+        VALUES (?, ?)
+        """,
+        (dataset_id, video_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_video_from_dataset(dataset_id: str, video_id: str):
+    conn = get_connection()
+    conn.execute(
+        """
+        DELETE FROM dataset_videos
+        WHERE dataset_id = ? AND video_id = ?
+        """,
+        (dataset_id, video_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_dataset_video_ids(dataset_id: str) -> list[str]:
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT video_id FROM dataset_videos WHERE dataset_id = ?",
+        (dataset_id,)
+    ).fetchall()
+    conn.close()
+    return [row["video_id"] for row in rows]
 
 
 def add_chat_message(session_id: str, role: str, content: str):

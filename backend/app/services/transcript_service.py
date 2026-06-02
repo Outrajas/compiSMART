@@ -34,54 +34,77 @@ class TranscriptService:
             logger.error(f"Whisper fallback failed: {e}")
             raise RuntimeError(f"Transcript extraction failed for {url}") from e
 
+    def compute_global_transcript_stats(self, full_text: str) -> dict:
+        """Computes global structural variables across the entire transcript for permanent caching."""
+        if not full_text:
+            return {"question_count": 0, "emotion_words": 0, "conflict_score": 0, "humor_score": 0}
+
+        text_lower = full_text.lower()
+        
+        question_words = ['?', 'what', 'how', 'why', 'who', 'when', 'where', 'which']
+        question_count = sum(1 for w in question_words if w in text_lower)
+
+        conflict_terms = ['but', 'however', 'no ', 'not ', 'fight', 'against', 'problem', 'issue',
+                          'bad', 'wrong', 'anger', 'angry', 'hate', 'enemy', 'challenge', 'conflict',
+                          'disagree', 'argue', 'debate', 'tension']
+        conflict_count = sum(1 for term in conflict_terms if term in text_lower)
+
+        emotion_words = ['!', 'very', 'really', 'so ', 'extremely', 'amazing', 'awesome', 'terrible',
+                         'incredible', 'love', 'hate', 'happy', 'sad', 'angry', 'excited', 'scared',
+                         'wow', 'omg', 'fantastic', 'horrible', 'epic', 'legendary', 'masterpiece']
+        emotion_count = sum(1 for w in emotion_words if w in text_lower)
+
+        humor_words = ['lol', 'haha', 'funny', 'joke', 'laugh', 'comedy', 'humor', 'hilarious',
+                       'fun', 'entertainment', '😂', '🤣', 'rofl', 'lmao', 'jokes', 'prank', 'gag']
+        humor_count = sum(1 for w in humor_words if w in text_lower)
+
+        return {
+            "question_count": question_count,
+            "emotion_words": emotion_count,
+            "conflict_score": conflict_count,
+            "humor_score": humor_count
+        }
+
     def _compute_semantic_features(self, text: str, segment_index: int, total_segments: int) -> dict:
-        """Enhanced semantic feature extraction with calibrated 0‑10 scales."""
+        """Enhanced semantic feature extraction with calibrated 0‑10 scales for segment chunks."""
         text_lower = text.lower()
 
-        # Question detection
         question_words = ['?', 'what', 'how', 'why', 'who', 'when', 'where', 'which']
         question_count = sum(1 for w in question_words if w in text_lower)
         has_question = question_count > 0
 
-        # Conflict
         conflict_terms = ['but', 'however', 'no ', 'not ', 'fight', 'against', 'problem', 'issue',
                           'bad', 'wrong', 'anger', 'angry', 'hate', 'enemy', 'challenge', 'conflict',
                           'disagree', 'argue', 'debate', 'tension']
         conflict_count = sum(1 for term in conflict_terms if term in text_lower)
         has_conflict = conflict_count > 0
 
-        # Emotional intensity
         emotion_words = ['!', 'very', 'really', 'so ', 'extremely', 'amazing', 'awesome', 'terrible',
                          'incredible', 'love', 'hate', 'happy', 'sad', 'angry', 'excited', 'scared',
                          'wow', 'omg', 'fantastic', 'horrible', 'epic', 'legendary', 'masterpiece']
         emotion_raw = sum(1 for w in emotion_words if w in text_lower)
         emotion_score = min(10, emotion_raw * 2)
 
-        # Humor
         humor_words = ['lol', 'haha', 'funny', 'joke', 'laugh', 'comedy', 'humor', 'hilarious',
                        'fun', 'entertainment', '😂', '🤣', 'rofl', 'lmao', 'jokes', 'prank', 'gag']
         humor_raw = sum(1 for w in humor_words if w in text_lower)
         humor_score = min(10, humor_raw * 2)
 
-        # Curiosity gap
         curiosity_words = ['?', 'wait', 'imagine', 'what if', 'secret', 'surprise', 'reveal', 'truth',
                            'unexpected', 'twist', 'discover', 'find out', 'see what happens', 'stay tuned',
                            'watch till the end']
         curiosity_raw = sum(1 for w in curiosity_words if w in text_lower)
         curiosity_score = min(10, curiosity_raw * 2)
 
-        # CTA
         cta_phrases = ['subscribe', 'like', 'share', 'comment', 'follow', 'click', 'link',
                        'check out', 'visit', 'watch till the end', 'hit the bell']
         cta_raw = sum(1 for phrase in cta_phrases if phrase in text_lower)
         cta_score = min(10, cta_raw * 2)
 
-        # Entity count (crude proper nouns)
         name_pattern = re.compile(r'\b[A-Z][a-z]+\b')
         names = name_pattern.findall(text)
         entity_count = len(set(names))
 
-        # Hook score: weighted sum, with bonus for being in the first 3 segments
         position_bonus = 1.5 if segment_index < 3 else 0
         hook_score = (has_question * 3.0 + has_conflict * 2.0 + curiosity_raw * 1.5 + entity_count * 0.3 + position_bonus)
         hook_score = round(min(10, hook_score), 1)
@@ -131,7 +154,6 @@ class TranscriptService:
                 logger.debug(f"Language {lang} failed: {e}")
                 continue
 
-        # Fallback to default
         try:
             transcript_list = api.fetch(video_id)
             segments = []
@@ -184,7 +206,9 @@ class TranscriptService:
                 raise FileNotFoundError(f"Audio file not created: {actual_audio}")
 
             model = get_whisper_model()
-            segments_raw, _ = model.transcribe(actual_audio, beam_size=5)
+            segments_raw_gen, _ = model.transcribe(actual_audio, beam_size=5)
+            segments_raw = list(segments_raw_gen)
+            
             segments = []
             full_text_parts = []
             total = len(segments_raw)

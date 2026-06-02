@@ -1,14 +1,30 @@
 from app.services.vector_store_service import VectorStoreService
-from app.db.sqlite import get_connection
+from app.db.sqlite import get_connection, get_dataset_video_ids
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue
 import json
 
 vector_store = VectorStoreService()
 
-def retrieve_metadata_by_dataset(dataset_id: str) -> list[dict]:
+def retrieve_metadata_by_dataset(dataset_id: str, active_video_ids: list[str] = None) -> list[dict]:
     conn = get_connection()
-    rows = conn.execute(
-        "SELECT * FROM videos WHERE dataset_id = ?", (dataset_id,)
-    ).fetchall()
+    
+    # Isolate extraction scope cleanly to current active context list parameters
+    if active_video_ids is not None:
+        if not active_video_ids:
+            conn.close()
+            return []
+        placeholders = ",".join(["?"] * len(active_video_ids))
+        query = f"SELECT * FROM videos WHERE video_id IN ({placeholders})"
+        rows = conn.execute(query, active_video_ids).fetchall()
+    else:
+        query = """
+            SELECT v.* FROM videos v
+            JOIN dataset_videos dv ON v.video_id = dv.video_id
+            WHERE dv.dataset_id = ?
+        """
+        rows = conn.execute(query, (dataset_id,)).fetchall()
+        
     conn.close()
     videos = []
     for row in rows:
@@ -21,6 +37,30 @@ def retrieve_metadata_by_dataset(dataset_id: str) -> list[dict]:
         data["engagement_rate"] = round((likes + comments) / views * 100, 4) if views else None
         followers = data.get("follower_count", 0) or 0
         data["views_per_follower"] = round(views / followers, 2) if followers else None
+        
+        # --- CHRONOLOGICAL TRANSCRIPT RECONSTRUCTION (Fallback for old cache) ---
+        transcript = data.get("transcript")
+        if not transcript:
+            try:
+                client = QdrantClient(host="localhost", port=6333)
+                results = client.scroll(
+                    collection_name="video_chunks",
+                    scroll_filter=Filter(must=[
+                        FieldCondition(key="video_id", match=MatchValue(value=data["video_id"]))
+                    ]),
+                    limit=2000
+                )
+                chunks = results[0]
+                if chunks:
+                    # Sort completely chronologically to guarantee correct order
+                    chunks.sort(key=lambda c: c.payload.get("start_time", 0))
+                    data["transcript"] = " ".join(c.payload.get("text", "") for c in chunks)
+                else:
+                    data["transcript"] = ""
+            except Exception as e:
+                print(f"Error reconstructing transcript for {data['video_id']}: {e}")
+                data["transcript"] = ""
+                
         videos.append(data)
     return videos
 
@@ -32,6 +72,10 @@ def retrieve_chunks(
     time_max: float | None = None,
     video_ids: list[str] | None = None
 ) -> list[dict]:
+    # Clean cross-platform parameter mapping to prevent Qdrant filter suppressions
+    if platform == "cross-platform":
+        platform = None
+
     chunks = vector_store.search_with_filter(
         query, limit,
         dataset_id=dataset_id,
@@ -39,11 +83,12 @@ def retrieve_chunks(
         time_max=time_max,
         video_ids=video_ids
     )
-    if not chunks and time_max is not None:
+    if not chunks:
         chunks = vector_store.search_with_filter(
             query, limit * 2,
-            dataset_id=dataset_id,
+            dataset_id=None,
             platform=platform,
+            time_max=time_max,
             video_ids=video_ids
         )
         if time_max == 5.0:
@@ -55,19 +100,12 @@ def retrieve_chunks(
 
 def dataset_has_videos(dataset_id: str) -> bool:
     conn = get_connection()
-    count = conn.execute("SELECT COUNT(*) FROM videos WHERE dataset_id = ?", (dataset_id,)).fetchone()[0]
+    count = conn.execute("SELECT COUNT(*) FROM dataset_videos WHERE dataset_id = ?", (dataset_id,)).fetchone()[0]
     conn.close()
     return count > 0
 
-# ---------- INTENT PLANNER (LLM‑based, retrieval‑first) ----------
+# ---------- INTENT PLANNER ----------
 def plan_intent(question: str, has_dataset: bool, groq_client) -> dict:
-    """
-    Returns a dict with keys:
-        - needs_retrieval (bool): whether to fetch transcript chunks
-        - needs_metadata (bool): whether to fetch metadata (always true if has_dataset)
-        - style (str): "concise", "analytical", "verbatim"
-        - intent (str): descriptive, for logging
-    """
     if not has_dataset:
         return {
             "needs_retrieval": False,
@@ -79,27 +117,21 @@ def plan_intent(question: str, has_dataset: bool, groq_client) -> dict:
     system = """You are a decision engine for a creator assistant. Your task is to decide whether a user query requires access to the loaded dataset (transcripts and metadata).
 
 Rules:
-- If the question asks about **any of the loaded videos** (e.g., "engagement rate", "which video", "compare", "hook", "transcript", "dialogue", "why did X outperform Y"), then needs_retrieval = true.
-- If the question is **completely unrelated** to the loaded dataset (e.g., "what is the population of France", "tell me a joke", "write python code", "how to cook pasta"), then needs_retrieval = false.
-- Even if the question is a greeting like "sup" or "hello", if a dataset is loaded, assume the user might want a quick summary → needs_retrieval = true (but style="concise").
+- If the question asks about **any of the loaded videos** (e.g., "engagement rate", "which video", "hook", "dialogue", "why did X outperform Y"), then needs_retrieval = true.
+- If the user explicitly asks for the **full, complete, or entire transcript** of a video, set style="full_transcript" and needs_retrieval=false.
+- If the user asks to **compare transcripts** (e.g., "compare transcripts of each video", "compare storytelling"), set style="transcript_comparison" and needs_retrieval=false.
+- If the user asks for exact quotes or specific verbatim dialogues (but NOT the full transcript), set style="verbatim" and needs_retrieval=true.
+- If the question is **completely unrelated** to the loaded dataset (e.g., "what is the population of France", "write python code"), then needs_retrieval = false.
 
 Output JSON with:
 {
     "needs_retrieval": bool,
-    "style": "concise" | "analytical" | "verbatim",
+    "style": "concise" | "analytical" | "verbatim" | "full_transcript" | "transcript_comparison",
     "reasoning": "short explanation"
 }
+"""
 
-Style:
-- "concise": for simple factual questions (e.g., "engagement rate of each video")
-- "analytical": for comparisons, why questions, deep analysis
-- "verbatim": when user asks for exact dialogues, quotes, timestamps
-
-Now, answer for this query:"""
-
-    prompt = f"""Dataset loaded: Yes, {dataset_has_videos} videos.
-User question: {question}
-JSON:"""
+    prompt = f"User question: {question}\nJSON:"
     try:
         response = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
@@ -124,7 +156,7 @@ JSON:"""
             "intent": "fallback_retrieve"
         }
 
-# ---------- SESSION MEMORY (unchanged) ----------
+# ---------- SESSION MEMORY ----------
 def init_session_state_table():
     conn = get_connection()
     conn.execute("""
@@ -159,10 +191,7 @@ def update_session_state(session_id: str, **kwargs):
     current = get_session_state(session_id)
     for k, v in kwargs.items():
         if v is not None:
-            if k in ["active_videos", "last_comparison"]:
-                current[k] = v
-            else:
-                current[k] = v
+            current[k] = v
     conn.execute("""
         INSERT OR REPLACE INTO session_state (session_id, last_intent, last_topic, active_videos, last_comparison, updated_at)
         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -170,23 +199,28 @@ def update_session_state(session_id: str, **kwargs):
         session_id,
         current.get("last_intent"),
         current.get("last_topic"),
-        json.dumps(current.get("active_videos", [])),
+        json.dumps(current.get("active_videos")),
         json.dumps(current.get("last_comparison")) if current.get("last_comparison") else None,
     ))
     conn.commit()
     conn.close()
 
-# ---------- CONTEXT COMPRESSION ----------
+
 def compress_context(chunks: list[dict], max_chunks: int = 10) -> list[dict]:
     return chunks[:max_chunks]
 
-# ---------- retrieve_context ----------
-def retrieve_context(question: str, dataset_id: str, platform: str = "youtube", needs_retrieval: bool = True) -> dict:
+
+def retrieve_context(question: str, dataset_id: str, platform: str = "youtube", needs_retrieval: bool = True, active_video_ids: list[str] = None) -> dict:
     from app.services.analytics_service import get_platform_summary_for_dataset, get_semantic_profiles_for_dataset
 
-    all_metadata = retrieve_metadata_by_dataset(dataset_id)
-    analytics_summary = get_platform_summary_for_dataset(dataset_id) if all_metadata else {}
-    semantic_profiles = get_semantic_profiles_for_dataset(dataset_id) if dataset_id else []
+    search_platform = None if platform == "cross-platform" else platform
+
+    if active_video_ids is None:
+        active_video_ids = get_dataset_video_ids(dataset_id)
+
+    all_metadata = retrieve_metadata_by_dataset(dataset_id, active_video_ids)
+    analytics_summary = get_platform_summary_for_dataset(dataset_id, active_video_ids) if all_metadata else {}
+    semantic_profiles = get_semantic_profiles_for_dataset(dataset_id, active_video_ids) if dataset_id else []
 
     hook_lines = []
     for p in semantic_profiles:
@@ -196,38 +230,28 @@ def retrieve_context(question: str, dataset_id: str, platform: str = "youtube", 
     hook_summary = "\n".join(hook_lines) if hook_lines else "No hook data."
 
     chunks = []
-    if needs_retrieval:
-        # Determine dynamic limit based on intent keywords
+    if needs_retrieval and active_video_ids:
         keywords = ["quote", "dialogue", "conversation", "emotion", "humor", "hook", "compare"]
         base_limit = 30 if any(k in question.lower() for k in keywords) else 10
 
-        # Determine target videos to loop over
-        video_ids = [v["video_id"] for v in all_metadata]
         specific_video_ids = []
         for v in all_metadata:
             title = v.get("title", "")
             if title and title.lower() in question.lower():
                 specific_video_ids.append(v["video_id"])
         
-        target_videos = specific_video_ids if specific_video_ids else video_ids
+        target_videos = specific_video_ids if specific_video_ids else active_video_ids
 
-        # Per-video retrieval to prevent the winner video from dominating
         for vid in target_videos:
             vid_chunks = retrieve_chunks(
                 question,
                 dataset_id=dataset_id,
                 limit=base_limit,
-                platform=platform,
+                platform=search_platform,
                 time_max=None,
                 video_ids=[vid]
             )
             chunks.extend(vid_chunks)
-
-        print(f"DEBUG: Retrieved {len(chunks)} chunks across {len(target_videos)} videos for query: {question[:50]}")
-        if chunks:
-            print(f"DEBUG: First chunk text: {chunks[0].get('text', '')[:100]}")
-        else:
-            print("DEBUG: No chunks retrieved from Qdrant")
 
     return {
         "all_metadata": all_metadata,
