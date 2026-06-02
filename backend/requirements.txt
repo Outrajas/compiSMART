@@ -13,3 +13,4 @@ sentence-transformers
 langchain-qdrant
 groq
 langgraph
+instaloader
