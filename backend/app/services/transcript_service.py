@@ -1,12 +1,18 @@
 import tempfile
 import os
 import re
+import inspect
+import http.cookiejar
+
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import NoTranscriptFound
 import yt_dlp
+
 from app.core.logger import logger
 
+
 _whisper_model = None
+
 
 def get_whisper_model():
     global _whisper_model
@@ -16,9 +22,66 @@ def get_whisper_model():
         _whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
     return _whisper_model
 
+
 class TranscriptService:
+    def _load_cookie_jar(self):
+        cookie_file = "/app/cookies.txt"
+
+        if not os.path.exists(cookie_file):
+            logger.warning(f"Cookie file missing: {cookie_file}")
+            return None
+
+        try:
+            jar = http.cookiejar.MozillaCookieJar()
+            jar.load(cookie_file, ignore_discard=True, ignore_expires=True)
+            logger.info(f"Loaded {len(jar)} YouTube cookies successfully")
+            return jar
+        except Exception as e:
+            logger.error(f"Failed loading cookies: {e}")
+            return None
+
+    def _create_transcript_api(self):
+        """
+        Create a YouTubeTranscriptApi instance, using cookies if supported by the installed version.
+        Falls back cleanly if the library signature doesn't accept cookie parameters.
+        """
+        cookie_jar = self._load_cookie_jar()
+
+        if not cookie_jar:
+            return YouTubeTranscriptApi()
+
+        try:
+            sig = inspect.signature(YouTubeTranscriptApi)
+            param_names = set(sig.parameters.keys())
+
+            # Try the most likely supported cookie argument names, depending on library version.
+            if "cookie_jar" in param_names:
+                try:
+                    return YouTubeTranscriptApi(cookie_jar=cookie_jar)
+                except Exception as e:
+                    logger.warning(f"YouTubeTranscriptApi(cookie_jar=...) failed: {e}")
+
+            if "cookies" in param_names:
+                try:
+                    return YouTubeTranscriptApi(cookies=cookie_jar)
+                except Exception as e:
+                    logger.warning(f"YouTubeTranscriptApi(cookies=...) failed: {e}")
+
+            if "cookiefile" in param_names:
+                try:
+                    return YouTubeTranscriptApi(cookiefile="/app/cookies.txt")
+                except Exception as e:
+                    logger.warning(f"YouTubeTranscriptApi(cookiefile=...) failed: {e}")
+
+        except Exception as e:
+            logger.warning(f"Could not inspect YouTubeTranscriptApi signature: {e}")
+
+        return YouTubeTranscriptApi()
+
     def extract_transcript(self, url: str, video_id: str = "A") -> dict:
         logger.info(f"Extracting transcript for {url} (video_id={video_id})")
+        logger.info(f"Cookie file exists: {os.path.exists('/app/cookies.txt')}")
+
         try:
             result = self._get_youtube_transcript_api(url)
             logger.info("Transcript obtained via YouTube Transcript API")
@@ -40,7 +103,7 @@ class TranscriptService:
             return {"question_count": 0, "emotion_words": 0, "conflict_score": 0, "humor_score": 0}
 
         text_lower = full_text.lower()
-        
+
         question_words = ['?', 'what', 'how', 'why', 'who', 'when', 'where', 'which']
         question_count = sum(1 for w in question_words if w in text_lower)
 
@@ -66,7 +129,7 @@ class TranscriptService:
         }
 
     def _compute_semantic_features(self, text: str, segment_index: int, total_segments: int) -> dict:
-        """Enhanced semantic feature extraction with calibrated 0‑10 scales for segment chunks."""
+        """Enhanced semantic feature extraction with calibrated 0-10 scales for segment chunks."""
         text_lower = text.lower()
 
         question_words = ['?', 'what', 'how', 'why', 'who', 'when', 'where', 'which']
@@ -106,7 +169,13 @@ class TranscriptService:
         entity_count = len(set(names))
 
         position_bonus = 1.5 if segment_index < 3 else 0
-        hook_score = (has_question * 3.0 + has_conflict * 2.0 + curiosity_raw * 1.5 + entity_count * 0.3 + position_bonus)
+        hook_score = (
+            has_question * 3.0
+            + has_conflict * 2.0
+            + curiosity_raw * 1.5
+            + entity_count * 0.3
+            + position_bonus
+        )
         hook_score = round(min(10, hook_score), 1)
 
         return {
@@ -122,7 +191,7 @@ class TranscriptService:
 
     def _get_youtube_transcript_api(self, url: str) -> dict:
         video_id = self._extract_video_id(url)
-        api = YouTubeTranscriptApi()
+        api = self._create_transcript_api()
 
         for lang in ['en', 'hi']:
             try:
@@ -130,6 +199,7 @@ class TranscriptService:
                 segments = []
                 full_text_parts = []
                 total = len(transcript_list)
+
                 for i, snippet in enumerate(transcript_list):
                     start = snippet.start
                     duration = snippet.duration
@@ -143,6 +213,7 @@ class TranscriptService:
                         "semantic_features": features
                     })
                     full_text_parts.append(text)
+
                 logger.info(f"Found transcript for language: {lang}")
                 return {
                     "transcript": " ".join(full_text_parts),
@@ -159,6 +230,7 @@ class TranscriptService:
             segments = []
             full_text_parts = []
             total = len(transcript_list)
+
             for i, snippet in enumerate(transcript_list):
                 start = snippet.start
                 duration = snippet.duration
@@ -172,6 +244,7 @@ class TranscriptService:
                     "semantic_features": features
                 })
                 full_text_parts.append(text)
+
             return {
                 "transcript": " ".join(full_text_parts),
                 "segments": segments
@@ -185,33 +258,45 @@ class TranscriptService:
         tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
         audio_path = tmp.name
         tmp.close()
+
+        base_path = audio_path[:-4]
+        actual_audio = base_path + ".mp3"
+
         try:
-            base_path = audio_path.replace('.mp3', '')
             ydl_opts = {
-                'format': 'bestaudio/best',
-                'outtmpl': base_path,
-                'quiet': True,
-                'no_warnings': True,
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
+                "format": "bestaudio/best",
+                "outtmpl": base_path,
+                "quiet": True,
+                "no_warnings": True,
+                "cookiefile": "/app/cookies.txt",
+                "http_headers": {
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/137.0.0.0 Safari/537.36"
+                    )
+                },
+                "postprocessors": [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
                 }],
             }
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
 
-            actual_audio = base_path + '.mp3'
             if not os.path.exists(actual_audio):
                 raise FileNotFoundError(f"Audio file not created: {actual_audio}")
 
             model = get_whisper_model()
             segments_raw_gen, _ = model.transcribe(actual_audio, beam_size=5)
             segments_raw = list(segments_raw_gen)
-            
+
             segments = []
             full_text_parts = []
             total = len(segments_raw)
+
             for i, seg in enumerate(segments_raw):
                 features = self._compute_semantic_features(seg.text, i, total)
                 segments.append({
@@ -221,16 +306,23 @@ class TranscriptService:
                     "semantic_features": features
                 })
                 full_text_parts.append(seg.text)
+
             return {
                 "transcript": " ".join(full_text_parts),
                 "segments": segments
             }
         finally:
             if os.path.exists(audio_path):
-                os.unlink(audio_path)
-            mp3_path = audio_path.replace('.mp3', '.mp3')
-            if os.path.exists(mp3_path):
-                os.unlink(mp3_path)
+                try:
+                    os.unlink(audio_path)
+                except Exception:
+                    pass
+
+            if os.path.exists(actual_audio):
+                try:
+                    os.unlink(actual_audio)
+                except Exception:
+                    pass
 
     def _extract_video_id(self, url: str) -> str:
         if "youtu.be/" in url:
